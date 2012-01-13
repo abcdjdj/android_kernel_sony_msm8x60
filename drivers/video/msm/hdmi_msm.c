@@ -2510,6 +2510,7 @@ static int hdcp_authentication_part1(void)
 			msleep(20);
 		msleep(100);
 
+
 		/* read Bcaps at 0x40 in HDCP Port */
 		ret = hdmi_msm_ddc_read(0x74, 0x40, &bcaps, 1, 5, "Bcaps",
 			TRUE);
