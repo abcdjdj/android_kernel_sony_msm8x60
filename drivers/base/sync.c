@@ -379,16 +379,6 @@ static int sync_fence_merge_pts(struct sync_fence *dst, struct sync_fence *src)
 	return 0;
 }
 
-static void sync_fence_detach_pts(struct sync_fence *fence)
-{
-	struct list_head *pos, *n;
-
-	list_for_each_safe(pos, n, &fence->pt_list_head) {
-		struct sync_pt *pt = container_of(pos, struct sync_pt, pt_list);
-		sync_timeline_remove_pt(pt);
-	}
-}
-
 static void sync_fence_free_pts(struct sync_fence *fence)
 {
 	struct list_head *pos, *n;
