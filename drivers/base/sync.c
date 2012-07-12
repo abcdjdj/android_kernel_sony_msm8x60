@@ -636,23 +636,13 @@ static int sync_fence_release(struct inode *inode, struct file *file)
 	struct sync_fence *fence = file->private_data;
 	unsigned long flags;
 
-	/*
-	 * We need to remove all ways to access this fence before droping
-	 * our ref.
-	 *
-	 * start with its membership in the global fence list
-	 */
 	spin_lock_irqsave(&sync_fence_list_lock, flags);
 	list_del(&fence->sync_fence_list);
 	spin_unlock_irqrestore(&sync_fence_list_lock, flags);
 
-	/*
-	 * remove its pts from their parents so that sync_timeline_signal()
-	 * can't reference the fence.
-	 */
-	sync_fence_detach_pts(fence);
+	sync_fence_free_pts(fence);
 
-	kref_put(&fence->kref, sync_fence_free);
+	kfree(fence);
 
 	return 0;
 }
