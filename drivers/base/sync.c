@@ -34,7 +34,6 @@
 static void sync_fence_signal_pt(struct sync_pt *pt);
 static int _sync_pt_has_signaled(struct sync_pt *pt);
 static void sync_fence_free(struct kref *kref);
-static void sync_dump(void);
 
 static LIST_HEAD(sync_timeline_list_head);
 static DEFINE_SPINLOCK(sync_timeline_list_lock);
@@ -118,6 +117,7 @@ static void sync_timeline_remove_pt(struct sync_pt *pt)
 {
 	struct sync_timeline *obj = pt->parent;
 	unsigned long flags;
+	bool needs_freeing = false;
 
 	spin_lock_irqsave(&obj->active_list_lock, flags);
 	if (!list_empty(&pt->active_list))
@@ -127,6 +127,8 @@ static void sync_timeline_remove_pt(struct sync_pt *pt)
 	spin_lock_irqsave(&obj->child_list_lock, flags);
 	if (!list_empty(&pt->child_list)) {
 		list_del_init(&pt->child_list);
+		needs_freeing = obj->destroyed &&
+			list_empty(&obj->child_list_head);
 	}
 	spin_unlock_irqrestore(&obj->child_list_lock, flags);
 }
@@ -379,6 +381,16 @@ static int sync_fence_merge_pts(struct sync_fence *dst, struct sync_fence *src)
 	return 0;
 }
 
+static void sync_fence_detach_pts(struct sync_fence *fence)
+{
+	struct list_head *pos, *n;
+
+	list_for_each_safe(pos, n, &fence->pt_list_head) {
+		struct sync_pt *pt = container_of(pos, struct sync_pt, pt_list);
+		sync_timeline_remove_pt(pt);
+	}
+}
+
 static void sync_fence_free_pts(struct sync_fence *fence)
 {
 	struct list_head *pos, *n;
@@ -626,13 +638,23 @@ static int sync_fence_release(struct inode *inode, struct file *file)
 	struct sync_fence *fence = file->private_data;
 	unsigned long flags;
 
+	/*
+	 * We need to remove all ways to access this fence before droping
+	 * our ref.
+	 *
+	 * start with its membership in the global fence list
+	 */
 	spin_lock_irqsave(&sync_fence_list_lock, flags);
 	list_del(&fence->sync_fence_list);
 	spin_unlock_irqrestore(&sync_fence_list_lock, flags);
 
-	sync_fence_free_pts(fence);
+	/*
+	 * remove its pts from their parents so that sync_timeline_signal()
+	 * can't reference the fence.
+	 */
+	sync_fence_detach_pts(fence);
 
-	kfree(fence);
+	kref_put(&fence->kref, sync_fence_free);
 
 	return 0;
 }
