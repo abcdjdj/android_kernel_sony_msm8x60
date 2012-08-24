@@ -34,6 +34,7 @@
 static void sync_fence_signal_pt(struct sync_pt *pt);
 static int _sync_pt_has_signaled(struct sync_pt *pt);
 static void sync_fence_free(struct kref *kref);
+static void sync_dump(void);
 
 static LIST_HEAD(sync_timeline_list_head);
 static DEFINE_SPINLOCK(sync_timeline_list_lock);
@@ -605,8 +606,6 @@ int sync_fence_wait(struct sync_fence *fence, long timeout)
 	}
 
 	if (fence->status == 0) {
-		pr_info("fence timeout on [%p] after %dms\n", fence,
-			jiffies_to_msecs(timeout));
 		sync_dump();
 		return -ETIME;
 	}
