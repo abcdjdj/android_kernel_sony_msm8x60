@@ -778,11 +778,6 @@ int mdp4_dsi_video_off(struct platform_device *pdev)
 
 	dsi_video_enabled = 0;
 
-	if (vctrl->vsync_irq_enabled) {
-		vctrl->vsync_irq_enabled = 0;
-		vsync_irq_disable(INTR_PRIMARY_VSYNC, MDP_PRIM_VSYNC_TERM);
-	}
-
 	undx =  vctrl->update_ndx;
 	vp = &vctrl->vlist[undx];
 	if (vp->update_cnt) {
@@ -812,6 +807,11 @@ int mdp4_dsi_video_off(struct platform_device *pdev)
 			mdp4_overlay_iommu_pipe_free(
 				vctrl->base_pipe->pipe_ndx, 1);
 		}
+	}
+
+	if (vctrl->vsync_irq_enabled) {
+		vctrl->vsync_irq_enabled = 0;
+		vsync_irq_disable(INTR_PRIMARY_VSYNC, MDP_PRIM_VSYNC_TERM);
 	}
 
 	/* mdp clock off */
