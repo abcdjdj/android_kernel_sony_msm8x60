@@ -585,6 +585,11 @@ static bool sync_fence_check(struct sync_fence *fence)
 int sync_fence_wait(struct sync_fence *fence, long timeout)
 {
 	int err = 0;
+	struct sync_pt *pt;
+
+	trace_sync_wait(fence, 1);
+	list_for_each_entry(pt, &fence->pt_list_head, pt_list)
+		trace_sync_pt(pt);
 
 	if (timeout > 0) {
 		timeout = msecs_to_jiffies(timeout);
