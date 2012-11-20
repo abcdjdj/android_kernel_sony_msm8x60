@@ -194,13 +194,14 @@ void mdp4_overlay_iommu_pipe_free(int ndx, int all)
 		return;
 
 	if (pipe->flags & MDP_MEMORY_ID_TYPE_FB) {
-		if (pipe->put0_need)
-			fput_light(pipe->srcp0_file, pipe->put0_need);
-		if (pipe->put1_need)
-			fput_light(pipe->srcp1_file, pipe->put1_need);
-		if (pipe->put2_need)
-			fput_light(pipe->srcp2_file, pipe->put2_need);
+		pipe->flags &= ~MDP_MEMORY_ID_TYPE_FB;
 
+		fput_light(pipe->srcp0_file, pipe->put0_need);
+		pipe->put0_need = 0;
+		fput_light(pipe->srcp1_file, pipe->put1_need);
+		pipe->put1_need = 0;
+		fput_light(pipe->srcp2_file, pipe->put2_need);
+		pipe->put2_need = 0;
 		pr_debug("%s: ndx=%d flags=%x put=%d\n", __func__,
 			pipe->pipe_ndx, pipe->flags, pipe->put0_need);
 		return;
@@ -2101,14 +2102,7 @@ void mdp4_mixer_blend_setup(int mixer)
 		outpdw(overlay_base + off + 0x108, blend->fg_alpha);
 		outpdw(overlay_base + off + 0x10c, blend->bg_alpha);
 
-<<<<<<< HEAD
-		if (mdp_rev >= MDP_REV_42 ||
-			ctrl->panel_mode & MDP4_PANEL_MDDI ||
-			 ctrl->panel_mode & MDP4_PANEL_DSI_CMD)
-			outpdw(overlay_base + off + 0x104, blend->op);
-=======
 		outpdw(overlay_base + off + 0x104, blend->op);
->>>>>>> fc337ff... Import of Sony 6.2.B.200 fuji sources
 
 		outpdw(overlay_base + (off << 5) + 0x1004, blend->co3_sel);
 		outpdw(overlay_base + off + 0x110, blend->transp_low0);/* low */
@@ -2444,14 +2438,11 @@ static int mdp4_overlay_req2pipe(struct mdp_overlay *req, int mixer,
 	 * zorder 2 == stage 2 == 4
 	 */
 	if (req->id == MSMFB_NEW_REQUEST) {  /* new request */
-<<<<<<< HEAD
-=======
 		if (mdp4_overlay_pipe_staged(pipe)) {
 			pr_err("%s: ndx=%d still staged\n", __func__,
 						pipe->pipe_ndx);
 			return -EPERM;
 		}
->>>>>>> fc337ff... Import of Sony 6.2.B.200 fuji sources
 		pipe->pipe_used++;
 		pipe->mixer_num = mixer;
 		pr_debug("%s: zorder=%d pipe ndx=%d num=%d\n", __func__,
