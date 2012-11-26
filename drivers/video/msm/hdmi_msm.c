@@ -864,8 +864,6 @@ static void hdmi_msm_send_event(boolean on)
 
 static void hdmi_msm_hpd_state_work(struct work_struct *work)
 {
-	boolean hpd_state;
-
 	if (!hdmi_ready()) {
 		DEV_ERR("hdmi: %s: ignored, probe failed\n", __func__);
 		return;
@@ -4425,6 +4423,36 @@ static void hdmi_msm_cec_read_timer_func(unsigned long data)
 }
 #endif
 
+static void hdmi_msm_hpd_polarity_setup(void)
+{
+	u32 cable_sense;
+	bool polarity = !external_common_state->hpd_state;
+	bool trigger = false;
+
+	if (polarity)
+		HDMI_OUTP(0x0254, BIT(2) | BIT(1));
+	else
+		HDMI_OUTP(0x0254, BIT(2));
+
+	cable_sense = (HDMI_INP(0x0250) & BIT(1)) >> 1;
+
+	if (cable_sense == polarity)
+		trigger = true;
+
+	DEV_DBG("%s: listen=%s, sense=%s, trigger=%s\n", __func__,
+		polarity ? "connect" : "disconnect",
+		cable_sense ? "connect" : "disconnect",
+		trigger ? "Yes" : "No");
+
+	if (trigger) {
+		u32 reg_val = HDMI_INP(0x0258);
+
+		/* Toggle HPD circuit to trigger HPD sense */
+		HDMI_OUTP(0x0258, reg_val & ~BIT(28));
+		HDMI_OUTP(0x0258, reg_val | BIT(28));
+	}
+}
+
 static void hdmi_msm_hpd_off(void)
 {
 	int rc = 0;
@@ -4522,9 +4550,11 @@ static int hdmi_msm_hpd_on(void)
 		/* set timeout to 4.1ms (max) for hardware debounce */
 		hpd_ctrl = HDMI_INP(0x0258) | 0x1FFF;
 
-		/* Toggle HPD circuit to trigger HPD sense */
-		HDMI_OUTP(0x0258, ~(1 << 28) & hpd_ctrl);
-		HDMI_OUTP(0x0258, (1 << 28) | hpd_ctrl);
+		/* Turn on HPD HW circuit */
+		HDMI_OUTP(0x0258, hpd_ctrl | BIT(28));
+
+		/* Set HPD cable sense polarity */
+		hdmi_msm_hpd_polarity_setup();
 	}
 
 	DEV_DBG("%s: (IRQ, 5V on)\n", __func__);
@@ -4587,16 +4617,25 @@ static int hdmi_msm_power_on(struct platform_device *pdev)
 		return ret;
 	}
 
+	if (!external_common_state->hpd_state) {
+		DEV_DBG("%s:HDMI cable not connected\n", __func__);
+		goto error;
+	}
+
 	/* Only start transmission with supported resolution */
 	changed = hdmi_common_get_video_format_from_drv_data(mfd);
-	hdmi_msm_audio_info_setup(TRUE, 0, 0, 0, FALSE);
+	if (changed || external_common_state->default_res_supported) {
+		mutex_lock(&external_common_state_hpd_mutex);
+		if (external_common_state->hpd_state &&
+				hdmi_msm_is_power_on()) {
+			mutex_unlock(&external_common_state_hpd_mutex);
 
-	mutex_lock(&external_common_state_hpd_mutex);
-	if (external_common_state->hpd_state &&	hdmi_msm_is_power_on()) {
-		DEV_DBG("%s: Turning HDMI on\n", __func__);
-		mutex_unlock(&external_common_state_hpd_mutex);
-		hdmi_msm_turn_on();
-		hdmi_msm_state->panel_power_on = TRUE;
+			DEV_INFO("HDMI cable connected %s(%dx%d, %d)\n",
+				__func__, mfd->var_xres, mfd->var_yres,
+				mfd->var_pixclock);
+
+			hdmi_msm_turn_on();
+			hdmi_msm_state->panel_power_on = TRUE;
 
 		if (hdmi_msm_state->hdcp_enable) {
 			/* Kick off HDCP Authentication */
@@ -4611,10 +4650,11 @@ static int hdmi_msm_power_on(struct platform_device *pdev)
 
 	hdmi_msm_dump_regs("HDMI-ON: ");
 
-	DEV_INFO("power=%s DVI= %s\n",
-		hdmi_msm_is_power_on() ? "ON" : "OFF" ,
-		hdmi_msm_is_dvi_mode() ? "ON" : "OFF");
-	return 0;
+error:
+	/* Set HPD cable sense polarity */
+	hdmi_msm_hpd_polarity_setup();
+
+	return ret;
 }
 
 void mhl_connect_api(boolean on)
@@ -4668,12 +4708,16 @@ EXPORT_SYMBOL(mhl_connect_api);
  */
 static int hdmi_msm_power_off(struct platform_device *pdev)
 {
-	char *envp[2];
 	int ret = 0;
 
 	if (!hdmi_ready()) {
 		DEV_ERR("%s: HDMI/HPD not initialized\n", __func__);
 		return ret;
+	}
+
+	if (!hdmi_msm_state->panel_power_on) {
+		DEV_DBG("%s: panel not ON\n", __func__);
+		goto error;
 	}
 
 	mutex_lock(&hdmi_msm_state_mutex);
@@ -4711,8 +4755,11 @@ static int hdmi_msm_power_off(struct platform_device *pdev)
 
 	if (!completion_done(&hdmi_msm_state->hpd_event_processed))
 		complete(&hdmi_msm_state->hpd_event_processed);
+error:
+	/* Set HPD cable sense polarity */
+	hdmi_msm_hpd_polarity_setup();
 
-	return 0;
+	return ret;
 }
 
 bool mhl_is_enabled(void)
@@ -5017,12 +5064,11 @@ static int hdmi_msm_hpd_feature(int on)
 
 			/* Wait for HDMI and FD to close */
 			INIT_COMPLETION(hdmi_msm_state->hpd_event_processed);
-			wait_for_completion_interruptible(
-				&hdmi_msm_state->hpd_event_processed);
+			wait_for_completion_interruptible_timeout(
+				&hdmi_msm_state->hpd_event_processed, HZ);
 		}
 
 		hdmi_msm_hpd_off();
-		SWITCH_SET_HDMI_AUDIO(0, 0);
 
 		/* Set HDMI switch node to 0 on HPD feature disable */
 		switch_set_state(&external_common_state->sdev, 0);
