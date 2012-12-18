@@ -2335,6 +2335,10 @@ static int mdp_on(struct platform_device *pdev)
 	}
 
 	mdp_histogram_ctrl_all(TRUE);
+
+	if (ret == 0)
+		ret = panel_next_late_init(pdev);
+
 	pr_debug("%s:-\n", __func__);
 
 	return ret;
@@ -2803,6 +2807,7 @@ static int mdp_probe(struct platform_device *pdev)
 	pdata = msm_fb_dev->dev.platform_data;
 	pdata->on = mdp_on;
 	pdata->off = mdp_off;
+	pdata->late_init = NULL;
 	pdata->next = pdev;
 
 	mdp_clk_ctrl(1);
