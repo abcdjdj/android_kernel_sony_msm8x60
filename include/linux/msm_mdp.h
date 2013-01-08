@@ -77,6 +77,8 @@
 						struct mdp_display_commit)
 #define MSMFB_OVERLAY_COMMIT      _IO(MSMFB_IOCTL_MAGIC, 163)
 
+#define MSMFB_METADATA_GET  _IOW(MSMFB_IOCTL_MAGIC, 166, struct msmfb_metadata)
+
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
@@ -503,6 +505,7 @@ struct msmfb_mdp_pp {
 enum {
 	metadata_op_none,
 	metadata_op_base_blend,
+	metadata_op_frame_rate,
 	metadata_op_max
 };
 
