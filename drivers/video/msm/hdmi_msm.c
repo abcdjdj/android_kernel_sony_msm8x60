@@ -4643,15 +4643,14 @@ static int hdmi_msm_power_off(struct platform_device *pdev)
 	}
 	mutex_unlock(&hdmi_msm_state_mutex);
 
-	envp[0] = "HDCP_STATE=FAIL";
-	envp[1] = NULL;
-	DEV_INFO("HDMI HPD: QDSP OFF\n");
-	kobject_uevent_env(external_common_state->uevent_kobj,
-			   KOBJ_CHANGE, envp);
-	switch_set_state(&external_common_state->sdev, 0);
-	switch_set_state(&external_common_state->audio_sdev, 0);
-	DEV_INFO("Hdmi state switch to %d: %s\n",
-		external_common_state->sdev.state, __func__);
+		/*
+		 * Cancel any pending reauth attempts.
+		 * If one is ongoing, wait for it to finish
+		 */
+		cancel_work_sync(&hdmi_msm_state->hdcp_reauth_work);
+		cancel_work_sync(&hdmi_msm_state->hdcp_work);
+		del_timer_sync(&hdmi_msm_state->hdcp_timer);
+		hdmi_msm_state->reauth = FALSE;
 
 	if (!hdmi_msm_is_dvi_mode()) {
 		hdmi_msm_audio_off();
