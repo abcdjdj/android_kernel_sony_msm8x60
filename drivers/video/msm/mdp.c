@@ -54,7 +54,8 @@ int mdp_rev;
 int mdp_iommu_split_domain;
 u32 mdp_max_clk = 200000000;
 u64 mdp_max_bw = 2000000000;
-
+u32 mdp_bw_ab_factor = MDP4_BW_AB_DEFAULT_FACTOR;
+u32 mdp_bw_ib_factor = MDP4_BW_IB_DEFAULT_FACTOR;
 static struct platform_device *mdp_init_pdev;
 
 /*
@@ -2660,6 +2661,13 @@ static int mdp_probe(struct platform_device *pdev)
 			pr_err("mdp: can not get mdp irq\n");
 			return -ENOMEM;
 		}
+
+		if (mdp_pdata->mdp_max_bw)
+			mdp_max_bw = mdp_pdata->mdp_max_bw;
+		if (mdp_pdata->mdp_bw_ab_factor)
+			mdp_bw_ab_factor = mdp_pdata->mdp_bw_ab_factor;
+		if (mdp_pdata->mdp_bw_ib_factor)
+			mdp_bw_ib_factor = mdp_pdata->mdp_bw_ib_factor;
 
 		mdp_rev = mdp_pdata->mdp_rev;
 
