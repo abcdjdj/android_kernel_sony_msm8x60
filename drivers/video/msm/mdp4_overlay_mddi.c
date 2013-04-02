@@ -177,6 +177,7 @@ void mdp4_overlay_update_lcd(struct msm_fb_data_type *mfd)
 
 #ifdef WHOLESCREEN
 
+/* TODO: Check if needed */
 	{
 		struct fb_info *fbi;
 
@@ -193,6 +194,24 @@ void mdp4_overlay_update_lcd(struct msm_fb_data_type *mfd)
 		pipe->dst_x = 0;
 		pipe->srcp0_addr = (uint32)src;
 		pipe->srcp0_ystride = fbi->fix.line_length;
+/* TODO END */
+
+	pipe = vp->plist;
+	for (i = 0; i < OVERLAY_PIPE_MAX; i++, pipe++) {
+		if (pipe->pipe_used) {
+			cnt++;
+			real_pipe = mdp4_overlay_ndx2pipe(pipe->pipe_ndx);
+			if (real_pipe && real_pipe->pipe_used) {
+				/* pipe not unset */
+			mdp4_overlay_vsync_commit(pipe);
+			}
+			/* free previous iommu to freelist
+			* which will be freed at next
+			* pipe_commit
+			*/
+			//mdp4_overlay_iommu_pipe_free(pipe->pipe_ndx, 0);
+			pipe->pipe_used = 0; /* clear */
+		}
 	}
 
 #else
