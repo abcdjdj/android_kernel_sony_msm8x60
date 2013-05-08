@@ -686,6 +686,93 @@ void mdp4_mddi_dma_s_kickoff(struct msm_fb_data_type *mfd,
 	/* start dma_s pipe */
 	mdp_pipe_kickoff(MDP_DMA_S_TERM, mfd);
 	mdp4_stat.kickoff_dmas++;
+}
+
+void mdp4_mddi_overlay_blt(struct msm_fb_data_type *mfd,
+					struct msmfb_overlay_blt *req)
+{
+	mdp4_mddi_do_blt(mfd, req->enable);
+}
+
+int mdp4_mddi_on(struct platform_device *pdev)
+{
+	int ret = 0;
+	int cndx = 0;
+	struct msm_fb_data_type *mfd;
+	struct vsycn_ctrl *vctrl;
+
+	pr_debug("%s+:\n", __func__);
+
+	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
+
+	vctrl = &vsync_ctrl_db[cndx];
+	vctrl->mfd = mfd;
+	vctrl->dev = mfd->fbi->dev;
+
+	mdp_clk_ctrl(1);
+	mdp4_overlay_update_mddi(mfd);
+	mdp_clk_ctrl(0);
+
+	mdp4_iommu_attach();
+
+	atomic_set(&vctrl->suspend, 0);
+	pr_debug("%s-:\n", __func__);
+
+	return ret;
+}
+
+int mdp4_mddi_off(struct platform_device *pdev)
+{
+	int ret = 0;
+	int cndx = 0;
+	struct msm_fb_data_type *mfd;
+	struct vsycn_ctrl *vctrl;
+	struct mdp4_overlay_pipe *pipe;
+
+	pr_debug("%s+:\n", __func__);
+
+	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
+
+	vctrl = &vsync_ctrl_db[cndx];
+	pipe = vctrl->base_pipe;
+	if (pipe == NULL) {
+		pr_err("%s: NO base pipe\n", __func__);
+		return ret;
+	}
+
+	atomic_set(&vctrl->suspend, 1);
+
+	/* sanity check, free pipes besides base layer */
+	mdp4_overlay_unset_mixer(pipe->mixer_num);
+	mdp4_mixer_stage_down(pipe, 1);
+	mdp4_overlay_pipe_free(pipe, 1);
+	vctrl->base_pipe = NULL;
+
+	if (vctrl->clk_enabled) {
+		/*
+		 * in case of suspend, vsycn_ctrl off is not
+		 * received from frame work which left clock on
+		 * then, clock need to be turned off here
+		 */
+		mdp_clk_ctrl(0);
+	}
+
+	vctrl->clk_enabled = 0;
+	vctrl->vsync_enabled = 0;
+	vctrl->clk_control = 0;
+	vctrl->expire_tick = 0;
+	vctrl->uevent = 0;
+
+	vsync_irq_disable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
+
+	pr_debug("%s-:\n", __func__);
+
+	/*
+	 * footswitch off
+	 * this will casue all mdp register
+	 * to be reset to default
+	 * after footswitch on later
+	 */
 
 	/* wait until DMA finishes the current job */
 	wait_for_completion(&mfd->dma->comp);
