@@ -2263,8 +2263,8 @@ struct mdp4_overlay_pipe *mdp4_overlay_pipe_alloc(int ptype, int mixer)
 				continue;
 			init_completion(&pipe->comp);
 			init_completion(&pipe->dmas_comp);
-			pr_debug("%s: pipe=%x ndx=%d num=%d\n", __func__,
-				(int)pipe, pipe->pipe_ndx, pipe->pipe_num);
+                        pr_debug("%s: pipe=%x ndx=%d num=%d type=%d\n", __func__,
+                                (int)pipe, pipe->pipe_ndx, pipe->pipe_num, ptype);
 			return pipe;
 		}
 	}
@@ -3759,12 +3759,22 @@ int mdp4_overlay_commit(struct fb_info *info)
 {
 	int ret = 0;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+/* FIXME: Check if needed
+	int mixer;
+*/
 
 	if (mfd == NULL)
 		return -ENODEV;
 
 	if (!mfd->panel_power_on) /* suspended */
 		return -EINVAL;
+
+/* FIXME: Check if needed
+	mixer = mfd->panel_info.pdest;	// DISPLAY_1 or DISPLAY_2
+
+	if (mixer >= MDP4_MIXER_MAX)
+		return -EPERM;
+*/
 
 	mutex_lock(&mfd->dma->ov_mutex);
 

@@ -82,6 +82,7 @@ struct msm_fb_data_type {
 	struct fb_info *fbi;
 
 	struct delayed_work backlight_worker;
+	struct device *dev;
 	boolean op_enable;
 	uint32 fb_imgType;
 	boolean sw_currently_refreshing;
@@ -217,10 +218,10 @@ struct msm_fb_data_type {
 	uint32 cached_reg_cnt;
 	uint32 cache_reg_en;
 };
-
 struct msm_fb_backup_type {
 	struct fb_info info;
 	struct mdp_display_commit disp_commit;
+        struct msm_fb_data_type mfd;
 };
 
 struct dentry *msm_fb_get_debugfs_root(void);
@@ -240,9 +241,8 @@ int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 int msm_fb_detect_client(const char *name);
 int calc_fb_offset(struct msm_fb_data_type *mfd, struct fb_info *fbi, int bpp);
-void msm_fb_wait_for_fence(struct msm_fb_data_type *mfd);
+int msm_fb_wait_for_fence(struct msm_fb_data_type *mfd);
 int msm_fb_signal_timeline(struct msm_fb_data_type *mfd);
-void msm_fb_release_timeline(struct msm_fb_data_type *mfd);
 #ifdef CONFIG_FB_BACKLIGHT
 void msm_fb_config_backlight(struct msm_fb_data_type *mfd);
 #endif
