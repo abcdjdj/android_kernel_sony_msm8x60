@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Author: Mike Lockwood <lockwood@android.com>
+ * Copyright (C) 2011 Sony Ericsson Mobile Communications AB.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -24,24 +25,11 @@ struct android_usb_platform_data {
 	u32 swfi_latency;
 	u8 usb_core_id;
 	bool cdrom;
+	char can_stall;
 };
 
-#ifndef CONFIG_TARGET_CORE
-static inline int f_tcm_init(int (*connect_cb)(bool connect))
-{
-	/*
-	 * Fail bind() not init(). If a function init() returns error
-	 * android composite registration would fail.
-	 */
-	return 0;
-}
-static inline void f_tcm_exit(void)
-{
-}
-static inline int tcm_bind_config(struct usb_configuration *c)
-{
-	return -ENODEV;
-}
+#ifdef CONFIG_USB_ANDROID_GG
+void android_enable_usb_gg(uint16_t vendor_id, uint16_t product_id);
 #endif
 
 #endif	/* __LINUX_USB_ANDROID_H */

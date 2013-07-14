@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Author: Brian Swetland <swetland@google.com>
- * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  * Copyright (C) 2012 Sony Ericsson Mobile Communications AB.
  * Copyright (C) 2012 Sony Mobile Communications AB
  *
@@ -295,7 +295,6 @@ struct msm_otg_platform_data {
  * @id_timer: The timer used for polling ID line to detect ACA states.
  * @xo_handle: TCXO buffer handle
  * @bus_perf_client: Bus performance client handle to request BUS bandwidth
- * @mhl_enabled: MHL driver registration successful and MHL enabled.
  * @id_wok: PMIC ID pin checking work.
  * @wq: Work queue for sm_work, chg_work and id_work.
  */
@@ -317,6 +316,7 @@ struct msm_otg {
 #define A_BUS_DROP	5
 #define VBUS_DROP_DET	5
 #define A_BUS_REQ	6
+#define MHL		6
 #define A_SRP_DET	7
 #define A_VBUS_VLD	8
 #define B_CONN		9
@@ -478,6 +478,8 @@ static inline int msm_ep_unconfig(struct usb_ep *ep)
 	return -ENODEV;
 }
 #endif
+
+void msm_otg_notify_vbus_drop(void);
 
 void msm_otg_notify_vbus_drop(void);
 

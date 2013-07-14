@@ -152,7 +152,7 @@ static void mdp4_lcdc_blt_ov_update(struct mdp4_overlay_pipe *pipe);
 static void mdp4_lcdc_wait4dmap(int cndx);
 static void mdp4_lcdc_wait4ov(int cndx);
 
-int mdp4_lcdc_pipe_commit(void)
+int mdp4_lcdc_pipe_commit(int cndx, int wait)
 {
 
 	int  i, undx;
@@ -164,7 +164,7 @@ int mdp4_lcdc_pipe_commit(void)
 	unsigned long flags;
 	int cnt = 0;
 
-	vctrl = &vsync_ctrl_db[0];
+	vctrl = &vsync_ctrl_db[cndx];
 
 	mutex_lock(&vctrl->update_lock);
 	undx =  vctrl->update_ndx;
@@ -253,6 +253,13 @@ int mdp4_lcdc_pipe_commit(void)
 	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
 
 	mdp4_stat.overlay_commit[pipe->mixer_num]++;
+
+	if (wait) {
+		if (pipe->ov_blt_addr)
+			mdp4_lcdc_wait4ov(cndx);
+		else
+			mdp4_lcdc_wait4dmap(cndx);
+	}
 
 	return cnt;
 }
@@ -645,8 +652,9 @@ int mdp4_lcdc_off(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
+	struct vsync_update *vp;
 	unsigned long flags;
-	int need_wait = 0;
+	int undx, need_wait = 0;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 	vctrl = &vsync_ctrl_db[cndx];
@@ -906,7 +914,7 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 	uint8 *buf;
 	unsigned int buf_offset;
 	int bpp;
-	int cndx = 0;
+	int cnt, cndx = 0;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
 
@@ -935,13 +943,17 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
 
-	mdp4_lcdc_pipe_commit();
-	mutex_unlock(&mfd->dma->ov_mutex);
+	cnt = 0;
+	mutex_lock(&mfd->dma->ov_mutex);
+	cnt = mdp4_lcdc_pipe_commit(cndx, 0);
 
-	if (pipe->ov_blt_addr)
-		mdp4_lcdc_wait4ov(0);
-	else
-		mdp4_lcdc_wait4dmap(0);
+	if (cnt) {
+		if (pipe->ov_blt_addr)
+			mdp4_lcdc_wait4ov(cndx);
+		else
+			mdp4_lcdc_wait4dmap(cndx);
+	}
 
 	mdp4_overlay_mdp_perf_upd(mfd, 0);
+	mutex_unlock(&mfd->dma->ov_mutex);
 }

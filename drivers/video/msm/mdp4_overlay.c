@@ -1,4 +1,6 @@
-/* Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+/*
+ * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1700,6 +1702,11 @@ void mdp4_mixer_stage_commit(int mixer)
 		data |= stage;
 	}
 
+	/*
+	 * stage_commit may be called from overlay_unset
+	 * for command panel, mdp clocks may be off at this time.
+	 * so mdp clock enabled is necessary
+	 */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 	mdp_clk_ctrl(1);
 
@@ -2127,27 +2134,7 @@ void mdp4_mixer_blend_setup(int mixer)
 				blend++; /* back to original stage */
 			}
 		}
-		blend++;
-	}
 
-	/* mixer numer, /dev/fb0, /dev/fb1, /dev/fb2 */
-	if (mixer == MDP4_MIXER2)
-		overlay_base = MDP_BASE + MDP4_OVERLAYPROC2_BASE;/* 0x88000 */
-	else if (mixer == MDP4_MIXER1)
-		overlay_base = MDP_BASE + MDP4_OVERLAYPROC1_BASE;/* 0x18000 */
-	else
-		overlay_base = MDP_BASE + MDP4_OVERLAYPROC0_BASE;/* 0x10000 */
-
-	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
-	blend = &ctrl->blend[mixer][MDP4_MIXER_STAGE_BASE];
-	/* lower limit */
-	outpdw(overlay_base + 0x180, blend->transp_low0);
-	outpdw(overlay_base + 0x184,  blend->transp_low1);
-	/* upper limit */
-	outpdw(overlay_base + 0x188, blend->transp_high0);
-	outpdw(overlay_base + 0x18c,  blend->transp_high1);
-	blend++; /* stage0 */
-	for (i = MDP4_MIXER_STAGE0; i < MDP4_MIXER_STAGE_MAX; i++) {
 		off = 20 * i;
 		off = 0x20 * (i - MDP4_MIXER_STAGE0);
 		if (i == MDP4_MIXER_STAGE3)
@@ -2161,8 +2148,7 @@ void mdp4_mixer_blend_setup(int mixer)
 		outpdw(overlay_base + off + 0x108, blend->fg_alpha);
 		outpdw(overlay_base + off + 0x10c, blend->bg_alpha);
 
-		if (mdp_rev >= MDP_REV_42)
-			outpdw(overlay_base + off + 0x104, blend->op);
+		outpdw(overlay_base + off + 0x104, blend->op);
 
 		outpdw(overlay_base + (off << 5) + 0x1004, blend->co3_sel);
 		outpdw(overlay_base + off + 0x110, blend->transp_low0);/* low */
@@ -2405,18 +2391,6 @@ static int mdp4_overlay_req2pipe(struct mdp_overlay *req, int mixer,
 		mdp4_stat.err_scale++;
 		pr_err("%s: scale down, too little (w)!\n", __func__);
 		return -ERANGE;
-	}
-
-	if (mdp_rev <= MDP_REV_41) {
-		if ((mdp4_overlay_format2type(req->src.format) ==
-			OVERLAY_TYPE_RGB) &&
-			!(req->flags & MDP_OV_PIPE_SHARE) &&
-			((req->src_rect.w > req->dst_rect.w) ||
-			 (req->src_rect.h > req->dst_rect.h))) {
-			mdp4_stat.err_size++;
-			pr_err("%s: downscale on RGB pipe!\n", __func__);
-			return -EINVAL;
-		}
 	}
 
 	if (mdp_hw_revision == MDP4_REVISION_V1) {
@@ -3520,8 +3494,7 @@ int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req)
 		if (ctrl->panel_mode & MDP4_PANEL_DSI_CMD) {
 			/* cndx = 0 */
 			mdp4_dsi_cmd_pipe_queue(0, pipe);
-		}
-		if (ctrl->panel_mode & MDP4_PANEL_DSI_VIDEO) {
+		} else if (ctrl->panel_mode & MDP4_PANEL_DSI_VIDEO) {
 			/* cndx = 0 */
 			mdp4_dsi_video_pipe_queue(0, pipe);
 		} else if (ctrl->panel_mode & MDP4_PANEL_LCDC) {

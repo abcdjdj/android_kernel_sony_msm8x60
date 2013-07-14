@@ -1,4 +1,5 @@
-/* Copyright (c) 2011-2013 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011 Sony Ericsson Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -38,6 +39,7 @@ struct msm_serial_hslite_platform_data {
 	bool set_uart_clk_zero;
 	bool use_pm;
 	int line;
+	int type;
 };
 
 #endif

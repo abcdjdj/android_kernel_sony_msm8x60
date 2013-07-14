@@ -1,7 +1,8 @@
 /* drivers/android/pmem.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -2010,10 +2011,11 @@ int pmem_cache_maint(struct file *file, unsigned int cmd,
 	}
 	pmem_len = pmem[id].len(id, data);
 	pmem_start_addr = pmem[id].start_addr(id, data);
-	up_read(&data->sem);
 
-	if (offset + length > pmem_len)
+	if (offset + length > pmem_len) {
+		up_read(&data->sem);
 		return -EINVAL;
+	}
 
 	vaddr = pmem_addr->vaddr;
 	paddr = pmem_start_addr + offset;
@@ -2028,7 +2030,7 @@ int pmem_cache_maint(struct file *file, unsigned int cmd,
 		clean_caches(vaddr, length, paddr);
 	else if (cmd == PMEM_INV_CACHES)
 		invalidate_caches(vaddr, length, paddr);
-
+	up_read(&data->sem);
 	return 0;
 }
 EXPORT_SYMBOL(pmem_cache_maint);

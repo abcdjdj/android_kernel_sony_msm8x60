@@ -115,20 +115,17 @@ enum {
 };
 
 /* system interrupts */
+/*note histogram interrupts defined in mdp.h*/
 #define INTR_OVERLAY0_DONE		BIT(0)
 #define INTR_OVERLAY1_DONE		BIT(1)
 #define INTR_DMA_S_DONE			BIT(2)
 #define INTR_DMA_E_DONE			BIT(3)
 #define INTR_DMA_P_DONE			BIT(4)
-#define INTR_VG1_HISTOGRAM		BIT(5)
-#define INTR_VG2_HISTOGRAM		BIT(6)
 #define INTR_PRIMARY_VSYNC		BIT(7)
 #define INTR_PRIMARY_INTF_UDERRUN	BIT(8)
 #define INTR_EXTERNAL_VSYNC		BIT(9)
 #define INTR_EXTERNAL_INTF_UDERRUN	BIT(10)
 #define INTR_PRIMARY_RDPTR		BIT(11)	/* read pointer */
-#define INTR_DMA_P_HISTOGRAM		BIT(17)
-#define INTR_DMA_S_HISTOGRAM		BIT(26)
 #define INTR_OVERLAY2_DONE		BIT(30)
 
 #ifdef CONFIG_FB_MSM_OVERLAY
@@ -137,11 +134,7 @@ enum {
 				INTR_VG1_HISTOGRAM | \
 				INTR_VG2_HISTOGRAM )
 #else
-#define MDP4_ANY_INTR_MASK	(INTR_DMA_P_DONE| \
-				INTR_DMA_P_HISTOGRAM | \
-				INTR_DMA_S_HISTOGRAM | \
-				INTR_VG1_HISTOGRAM | \
-				INTR_VG2_HISTOGRAM)
+#define MDP4_ANY_INTR_MASK	(INTR_DMA_P_DONE)
 #endif
 
 enum {
@@ -366,7 +359,7 @@ struct mdp4_overlay_pipe {
 	uint32 ov_cnt;
 	uint32 dmap_cnt;
 	uint32 dmae_cnt;
-	uint32 blt_end;
+	uint32 blt_end;	/* used by mddi only */
 	uint32 blt_ov_koff;
 	uint32 blt_ov_done;
 	uint32 blt_dmap_koff;
@@ -538,7 +531,7 @@ static inline void mdp4_dtv_overlay_blt_stop(struct msm_fb_data_type *mfd)
 {
 	return;
 }
-static inline void mdp4_dtv_base_swap(struct mdp4_overlay_pipe *pipe)
+static inline void mdp4_dtv_base_swap(int cndx, struct mdp4_overlay_pipe *pipe)
 {
 	/* empty */
 }
@@ -563,12 +556,9 @@ void mdp4_overlay0_done_dsi_video(int cndx);
 void mdp4_overlay0_done_dsi_cmd(int cndx);
 void mdp4_primary_rdptr(void);
 void mdp4_dsi_cmd_overlay(struct msm_fb_data_type *mfd);
-int mdp4_overlay_commit(struct fb_info *info, int mixer);
-int mdp4_dsi_video_pipe_commit(void);
-int mdp4_dsi_cmd_pipe_commit(void);
+int mdp4_lcdc_pipe_commit(int cndx, int wait);
+int mdp4_dtv_pipe_commit(int cndx, int wait);
 int mdp4_dsi_cmd_update_cnt(int cndx);
-int mdp4_lcdc_pipe_commit(void);
-int mdp4_dtv_pipe_commit(void);
 void mdp4_dsi_rdptr_init(int cndx);
 void mdp4_dsi_vsync_init(int cndx);
 void mdp4_lcdc_vsync_init(int cndx);
@@ -605,6 +595,7 @@ int mdp4_overlay_unset_mixer(int mixer);
 int mdp4_overlay_play_wait(struct fb_info *info,
 	struct msmfb_overlay_data *req);
 int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req);
+int mdp4_overlay_commit(struct fb_info *info, int mixer);
 struct mdp4_overlay_pipe *mdp4_overlay_pipe_alloc(int ptype, int mixer);
 void mdp4_overlay_dma_commit(int mixer);
 void mdp4_overlay_vsync_commit(struct mdp4_overlay_pipe *pipe);
@@ -804,6 +795,8 @@ void mdp4_dsi_cmd_wait4vsync(int cndx, long long *vtime);
 void mdp4_dsi_video_wait4vsync(int cndx, long long *vtime);
 void mdp4_dsi_cmd_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
 void mdp4_dsi_video_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
+int mdp4_dsi_video_pipe_commit(int cndx, int wait);
+int mdp4_dsi_cmd_pipe_commit(int cndx, int wait);
 void mdp4_dsi_cmd_vsync_ctrl(struct fb_info *info, int enable);
 void mdp4_dsi_video_vsync_ctrl(struct fb_info *info, int enable);
 #ifdef CONFIG_FB_MSM_MDP303
@@ -876,6 +869,14 @@ static inline void mdp4_dsi_cmd_pipe_queue(int cndx,
 static inline void mdp4_dsi_video_pipe_queue(int cndx,
 			struct mdp4_overlay_pipe *pipe)
 {
+}
+static inline int mdp4_dsi_video_pipe_commit(int cndx, int wait)
+{
+	return 0;
+}
+static inline int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
+{
+	return 0;
 }
 static inline void mdp4_dsi_cmd_vsync_ctrl(struct fb_info *info,
 					int enable)

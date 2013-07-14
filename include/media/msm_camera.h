@@ -1,5 +1,5 @@
-/* Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2010 Sony Ericsson Mobile Communications AB.
+/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -447,30 +447,36 @@ struct msm_snapshot_pp_status {
 #define CFG_GET_PICT_P_PL		    25
 #define CFG_GET_AF_MAX_STEPS		26
 #define CFG_GET_PICT_MAX_EXP_LC		27
-/* extension begin */
-#define CFG_SEND_WB_INFO		    28
-#define CFG_SET_DIMENSION		    29
-#define CFG_SET_PREVIEW_MODE		30
-#define	CFG_SET_TEST_PATTERN		31
-#define CFG_GET_INT_INFO		    32
-#define CFG_GET_AF_STATUS		    33
-#define CFG_GET_EXIF			    34
-#define CFG_SET_SCENE			    35
-#define CFG_GET_AF_ASSIST_LIGHT		36
-#define CFG_SET_SHARPNESS		    37
-#define CFG_SET_IMG_QUALITY		    38
-#define CFG_SET_EXPOSURE_COMPENSATION	39
-#define CFG_SET_ISO                 40
-#define CFG_SET_SENSOR_DIMENSION    41
-#define CFG_SET_FLASH               42
-#define CFG_GPIO_CTRL			43
-#define CFG_I2C_WRITE			44
-#define CFG_I2C_READ			45
-#define CFG_CSI_CTRL			46
-#define CFG_ROM_READ			47
-/* extension end */
-#define CFG_MAX 					48
+#define CFG_SEND_WB_INFO    28
+#define CFG_SENSOR_INIT    29
+#define CFG_GET_3D_CALI_DATA 30
+#define CFG_GET_CALIB_DATA		31
+#define CFG_GET_OUTPUT_INFO		32
+#define CFG_GET_EEPROM_INFO		33
+#define CFG_GET_EEPROM_DATA		34
+#define CFG_SET_ACTUATOR_INFO		35
+#define CFG_GET_ACTUATOR_INFO           36
+/* TBD: QRD */
+#define CFG_SET_SATURATION            37
+#define CFG_SET_SHARPNESS             38
+#define CFG_SET_TOUCHAEC              39
+#define CFG_SET_AUTO_FOCUS            40
+#define CFG_SET_AUTOFLASH             41
+#define CFG_SET_EXPOSURE_COMPENSATION 42
+#define CFG_SET_ISO                   43
+#define CFG_START_STREAM              44
+#define CFG_STOP_STREAM               45
+#define CFG_GET_CSI_PARAMS            46
 
+/* extension begin */
+#define CFG_SET_GPIO_CTRL		47
+#define CFG_SET_WRITE_CMD		48
+#define CFG_SET_READ_CMD		49
+#define CFG_SET_CSI_CTRL		50
+#define CFG_GET_ROM			51
+/* extension end */
+
+#define CFG_MAX			52
 
 
 #define MOVE_NEAR	0
@@ -541,6 +547,120 @@ struct fps_cfg {
 	uint16_t f_mult;
 	uint16_t fps_div;
 	uint32_t pict_fps_div;
+};
+struct wb_info_cfg {
+	uint16_t red_gain;
+	uint16_t green_gain;
+	uint16_t blue_gain;
+};
+
+/* extension begin */
+enum sensor_gpio_ctrl_type {
+	SENSOR_GPIO_CTRL_RESET,
+	SENSOR_GPIO_CTRL_STANBY,
+};
+
+struct sensor_gpio_ctrl {
+	enum sensor_gpio_ctrl_type gpio;
+	int value;
+};
+
+enum sensor_i2c_addr_type {
+	SENSOR_I2C_ADDR_0BYTE = 0,
+	SENSOR_I2C_ADDR_1BYTE = 1,
+	SENSOR_I2C_ADDR_2BYTE = 2,
+	SENSOR_I2C_ADDR_4BYTE = 4,
+};
+
+struct sensor_i2c_io {
+	uint8_t slave_addr;
+	uint32_t address;
+	enum sensor_i2c_addr_type address_type;
+	uint8_t length;
+	uint8_t __user *data;
+};
+
+struct sensor_csid_vc_cfg {
+	uint8_t cid;
+	uint8_t dt;
+	uint8_t decode_format;
+};
+
+struct sensor_csid_lut_params {
+	uint8_t num_cid;
+	struct sensor_csid_vc_cfg *vc_cfg;
+};
+
+struct sensor_csid_params {
+	uint8_t lane_cnt;
+	uint8_t lane_assign;
+	struct sensor_csid_lut_params lut_params;
+};
+
+struct sensor_csiphy_params {
+	uint8_t lane_cnt;
+	uint8_t settle_cnt;
+	uint8_t lane_mask;
+};
+
+#define SENSOR_CSI_EMBED_DATA	0x12
+#define SENSOR_CSI_RAW8		0x2A
+#define SENSOR_CSI_RAW10	0x2B
+#define SENSOR_CSI_RAW12	0x2C
+
+#define SENSOR_CSI_DECODE_6BIT	0
+#define SENSOR_CSI_DECODE_8BIT	1
+#define SENSOR_CSI_DECODE_10BIT	2
+
+struct sensor_csi2_params {
+	struct sensor_csid_params csid_params;
+	struct sensor_csiphy_params csiphy_params;
+};
+
+struct sensor_rom_in {
+	uint16_t address;
+	uint16_t length;
+	uint8_t __user *data;
+};
+/* extension end */
+
+struct sensor_3d_exp_cfg {
+	uint16_t gain;
+	uint32_t line;
+	uint16_t r_gain;
+	uint16_t b_gain;
+	uint16_t gr_gain;
+	uint16_t gb_gain;
+	uint16_t gain_adjust;
+};
+struct sensor_3d_cali_data_t{
+	unsigned char left_p_matrix[3][4][8];
+	unsigned char right_p_matrix[3][4][8];
+	unsigned char square_len[8];
+	unsigned char focal_len[8];
+	unsigned char pixel_pitch[8];
+	uint16_t left_r;
+	uint16_t left_b;
+	uint16_t left_gb;
+	uint16_t left_af_far;
+	uint16_t left_af_mid;
+	uint16_t left_af_short;
+	uint16_t left_af_5um;
+	uint16_t left_af_50up;
+	uint16_t left_af_50down;
+	uint16_t right_r;
+	uint16_t right_b;
+	uint16_t right_gb;
+	uint16_t right_af_far;
+	uint16_t right_af_mid;
+	uint16_t right_af_short;
+	uint16_t right_af_5um;
+	uint16_t right_af_50up;
+	uint16_t right_af_50down;
+};
+struct sensor_init_cfg {
+	uint8_t prev_res;
+	uint8_t pict_res;
 };
 
 /* extension begin */
@@ -695,20 +815,201 @@ struct sensor_cfg_data {
 		struct focus_cfg focus;
 		struct fps_cfg fps;
 		struct wb_info_cfg wb_info;
+		struct sensor_3d_exp_cfg sensor_3d_exp;
+		struct sensor_calib_data calib_info;
+		struct sensor_output_info_t output_info;
+		struct msm_eeprom_data_t eeprom_data;
+		struct csi_lane_params_t csi_lane_params;
+		/* QRD */
+		uint16_t antibanding;
+		uint8_t contrast;
+		uint8_t saturation;
+		uint8_t sharpness;
+		int8_t brightness;
+		int ae_mode;
+		uint8_t wb_val;
+		int8_t exp_compensation;
+		struct cord aec_cord;
+		int is_autoflash;
+		struct mirror_flip mirror_flip;
 		/* extension begin */
-		struct camera_dimension_t dimension;
-		enum set_test_pattern_t set_test_pattern;
-		enum camera_af_status af_status;
-		struct cam_ctrl_exif_params_t exif;
-		enum camera_scene scene;
-		struct camera_preview_dimension_t preview_dimension;
-		uint8_t flashled;
-		enum camera_focus_mode focus_mode;
 		struct sensor_gpio_ctrl gpio_ctrl;
 		struct sensor_i2c_io i2c_io;
-		struct sensor_csi_params csi_ctrl;
+		struct sensor_csi2_params csi_ctrl;
 		struct sensor_rom_in rom_in;
 		/* extension end */
+	} cfg;
+};
+
+struct damping_params_t {
+	uint32_t damping_step;
+	uint32_t damping_delay;
+	uint32_t hw_params;
+};
+
+enum actuator_type {
+	ACTUATOR_VCM,
+	ACTUATOR_PIEZO,
+};
+
+enum msm_actuator_data_type {
+	MSM_ACTUATOR_BYTE_DATA = 1,
+	MSM_ACTUATOR_WORD_DATA,
+};
+
+enum msm_actuator_addr_type {
+	MSM_ACTUATOR_BYTE_ADDR = 1,
+	MSM_ACTUATOR_WORD_ADDR,
+};
+
+enum msm_actuator_write_type {
+	MSM_ACTUATOR_WRITE_HW_DAMP,
+	MSM_ACTUATOR_WRITE_DAC,
+};
+
+struct msm_actuator_reg_params_t {
+	enum msm_actuator_write_type reg_write_type;
+	uint32_t hw_mask;
+	uint16_t reg_addr;
+	uint16_t hw_shift;
+	uint16_t data_shift;
+};
+
+struct reg_settings_t {
+	uint16_t reg_addr;
+	uint16_t reg_data;
+};
+
+struct region_params_t {
+	/* [0] = ForwardDirection Macro boundary
+	   [1] = ReverseDirection Inf boundary
+	 */
+	uint16_t step_bound[2];
+	uint16_t code_per_step;
+};
+
+struct msm_actuator_move_params_t {
+	int8_t dir;
+	int8_t sign_dir;
+	int16_t dest_step_pos;
+	int32_t num_steps;
+	struct damping_params_t *ringing_params;
+};
+
+struct msm_actuator_tuning_params_t {
+	int16_t initial_code;
+	uint16_t pwd_step;
+	uint16_t region_size;
+	uint32_t total_steps;
+	struct region_params_t *region_params;
+};
+
+struct msm_actuator_params_t {
+	enum actuator_type act_type;
+	uint8_t reg_tbl_size;
+	uint16_t data_size;
+	uint16_t init_setting_size;
+	uint32_t i2c_addr;
+	enum msm_actuator_addr_type i2c_addr_type;
+	enum msm_actuator_data_type i2c_data_type;
+	struct msm_actuator_reg_params_t *reg_tbl_params;
+	struct reg_settings_t *init_settings;
+};
+
+struct msm_actuator_set_info_t {
+	struct msm_actuator_params_t actuator_params;
+	struct msm_actuator_tuning_params_t af_tuning_params;
+};
+
+struct msm_actuator_get_info_t {
+	uint32_t focal_length_num;
+	uint32_t focal_length_den;
+	uint32_t f_number_num;
+	uint32_t f_number_den;
+	uint32_t f_pix_num;
+	uint32_t f_pix_den;
+	uint32_t total_f_dist_num;
+	uint32_t total_f_dist_den;
+	uint32_t hor_view_angle_num;
+	uint32_t hor_view_angle_den;
+	uint32_t ver_view_angle_num;
+	uint32_t ver_view_angle_den;
+};
+
+enum af_camera_name {
+	ACTUATOR_MAIN_CAM_0,
+	ACTUATOR_MAIN_CAM_1,
+	ACTUATOR_MAIN_CAM_2,
+	ACTUATOR_MAIN_CAM_3,
+	ACTUATOR_MAIN_CAM_4,
+	ACTUATOR_MAIN_CAM_5,
+	ACTUATOR_WEB_CAM_0,
+	ACTUATOR_WEB_CAM_1,
+	ACTUATOR_WEB_CAM_2,
+};
+
+struct msm_actuator_cfg_data {
+	int cfgtype;
+	uint8_t is_af_supported;
+	union {
+		struct msm_actuator_move_params_t move;
+		struct msm_actuator_set_info_t set_info;
+		struct msm_actuator_get_info_t get_info;
+		enum af_camera_name cam_name;
+	} cfg;
+};
+
+struct msm_eeprom_support {
+	uint16_t is_supported;
+	uint16_t size;
+	uint16_t index;
+	uint16_t qvalue;
+};
+
+struct msm_calib_wb {
+	uint16_t r_over_g;
+	uint16_t b_over_g;
+	uint16_t gr_over_gb;
+};
+
+struct msm_calib_af {
+	uint16_t macro_dac;
+	uint16_t inf_dac;
+	uint16_t start_dac;
+};
+
+struct msm_calib_lsc {
+	uint16_t r_gain[221];
+	uint16_t b_gain[221];
+	uint16_t gr_gain[221];
+	uint16_t gb_gain[221];
+};
+
+struct pixel_t {
+	int x;
+	int y;
+};
+
+struct msm_calib_dpc {
+	uint16_t validcount;
+	struct pixel_t snapshot_coord[128];
+	struct pixel_t preview_coord[128];
+	struct pixel_t video_coord[128];
+};
+
+struct msm_camera_eeprom_info_t {
+	struct msm_eeprom_support af;
+	struct msm_eeprom_support wb;
+	struct msm_eeprom_support lsc;
+	struct msm_eeprom_support dpc;
+};
+
+struct msm_eeprom_cfg_data {
+	int cfgtype;
+	uint8_t is_eeprom_supported;
+	union {
+		struct msm_eeprom_data_t get_data;
+		struct msm_camera_eeprom_info_t get_info;
 	} cfg;
 };
 

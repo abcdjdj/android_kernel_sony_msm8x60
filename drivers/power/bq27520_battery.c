@@ -98,6 +98,7 @@
 
 #define USB_CHG  0x01
 #define WALL_CHG 0x02
+#define CRADLE_CHG 0x04
 
 #define SOH_VALUE_READY 0x3
 
@@ -1946,6 +1947,38 @@ static void bq27520_update_online_status(struct bq27520_data *bd,
 			"USB charger disconnected\n");
 		}
 	} else if (POWER_SUPPLY_TYPE_MAINS == type) {
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+		if (bd->pdata->get_ac_online_status) {
+			int ac = bd->pdata->get_ac_online_status();
+			int cradle = bd->chg_connected & CRADLE_CHG;
+			int curr_wall = ac & WALL_CHG;
+			int curr_cradle = ac & CRADLE_CHG;
+
+			if (IS_CHG_CONNECTED(wall, curr_wall)) {
+				bd->chg_connected |= WALL_CHG;
+				dev_dbg(&bd->clientp->dev,
+				"Wall charger connected\n");
+			}
+
+			if (IS_CHG_DISCONNECTED(wall, curr_wall)) {
+				bd->chg_connected &= ~WALL_CHG;
+				dev_dbg(&bd->clientp->dev,
+				"Wall charger disconnected\n");
+			}
+
+			if (IS_CHG_CONNECTED(cradle, curr_cradle)) {
+				bd->chg_connected |= CRADLE_CHG;
+				dev_dbg(&bd->clientp->dev,
+				"Cradle charger connected\n");
+			}
+
+			if (IS_CHG_DISCONNECTED(cradle, curr_cradle)) {
+				bd->chg_connected &= ~CRADLE_CHG;
+				dev_dbg(&bd->clientp->dev,
+				"Cradle charger disconnected\n");
+			}
+		}
+#else
 		if (IS_CHG_CONNECTED(wall, curr_val)) {
 			bd->chg_connected |= WALL_CHG;
 			dev_dbg(&bd->clientp->dev,
@@ -1957,6 +1990,7 @@ static void bq27520_update_online_status(struct bq27520_data *bd,
 			dev_dbg(&bd->clientp->dev,
 			"Wall charger disconnected\n");
 		}
+#endif
 	}
 }
 

@@ -23,6 +23,9 @@ struct bq27520_platform_data {
 	struct bq27520_block_table *udatap;
 	void (*disable_algorithm)(bool);
 	int (*gpio_configure)(int);
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	u8 (*get_ac_online_status)(void);
+#endif
 };
 
 int bq27520_get_current_average(void);

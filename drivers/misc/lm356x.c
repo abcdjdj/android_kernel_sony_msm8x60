@@ -1465,6 +1465,8 @@ err_chip_init:
 	return result;
 }
 
+#if 0
+
 static int __devinit lm3561_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
@@ -1507,6 +1509,7 @@ err_chip_init:
 	return result;
 }
 
+#endif
 
 static int __devexit lm356x_remove(struct i2c_client *client)
 {
@@ -1616,6 +1619,8 @@ static void __exit lm3560_exit(void)
 module_init(lm3560_init);
 module_exit(lm3560_exit);
 
+#if 0
+
 static const struct i2c_device_id lm3561_id[] = {
 	{ LM3561_DRV_NAME, 0 },
 };
@@ -1645,7 +1650,7 @@ static void __exit lm3561_exit(void)
 module_init(lm3561_init);
 module_exit(lm3561_exit);
 
-
+#endif
 
 MODULE_AUTHOR("Kazunari YOSHINO <Kazunari.X.Yoshino@sonyericsson.com>");
 MODULE_DESCRIPTION("LM356X I2C LED driver");

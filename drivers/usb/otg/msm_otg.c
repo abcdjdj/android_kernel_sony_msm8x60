@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  * Copyright (c) 2012 Sony Ericsson Mobile Communications AB.
  * Copyright (C) 2012 Sony Mobile Communications AB
  *
@@ -52,6 +52,14 @@
 #include <mach/msm_xo.h>
 #include <mach/msm_bus.h>
 #include <mach/rpm-regulator.h>
+
+#ifdef CONFIG_USB_HOST_EXTRA_NOTIFICATION
+#include <linux/usb/host_ext_event.h>
+#endif
+
+#ifdef CONFIG_MHL
+#include <linux/mhl.h>
+#endif
 
 #define MSM_USB_BASE	(motg->regs)
 #define DRIVER_NAME	"msm_otg"
@@ -1476,23 +1484,20 @@ static int msm_otg_set_peripheral(struct usb_otg *otg,
 	return 0;
 }
 
-static int msm_otg_mhl_register_callback(struct msm_otg *motg,
+static void msm_otg_mhl_register_callback(struct msm_otg *motg,
 						void (*callback)(int on))
 {
-	struct usb_phy *phy = &motg->phy;
+	struct otg_transceiver *otg = &motg->otg;
+#ifdef CONFIG_MHL
 	int ret;
 
-	if (motg->pdata->otg_control != OTG_PMIC_CONTROL ||
-			!motg->pdata->pmic_id_irq) {
-		dev_dbg(phy->dev, "MHL can not be supported without PMIC Id\n");
-		return -ENODEV;
-	}
-
 	if (!motg->pdata->mhl_dev_name) {
-		dev_dbg(phy->dev, "MHL device name does not exist.\n");
-		return -ENODEV;
+		dev_err(otg->dev, "MHL device name does not exist.\n");
+		return;
 	}
 
+	dev_dbg(otg->dev, "call mhl_register_callback(%s)\n",
+						motg->pdata->mhl_dev_name);
 	if (callback)
 		ret = mhl_register_callback(motg->pdata->mhl_dev_name,
 								callback);
@@ -1500,74 +1505,65 @@ static int msm_otg_mhl_register_callback(struct msm_otg *motg,
 		ret = mhl_unregister_callback(motg->pdata->mhl_dev_name);
 
 	if (ret)
-		dev_dbg(phy->dev, "mhl_register_callback(%s) return error=%d\n",
+		dev_err(otg->dev, "mhl_register_callback(%s) return error=%d\n",
 						motg->pdata->mhl_dev_name, ret);
-	else
-		motg->mhl_enabled = true;
-
-	return ret;
+#else
+	dev_info(otg->dev, "MHL is not supported.\n");
+#endif
+	return;
 }
 
 static void msm_otg_mhl_notify_online(int on)
 {
 	struct msm_otg *motg = the_msm_otg;
-	struct usb_phy *phy = &motg->phy;
-	bool queue = false;
+	struct otg_transceiver *otg = &motg->otg;
 
-	dev_dbg(phy->dev, "notify MHL %s%s\n", on ? "" : "dis", "connected");
-
-	if (on) {
+	dev_info(otg->dev, "notify MHL %s%s\n", on ? "" : "dis", "connected");
+	if (on)
 		set_bit(MHL, &motg->inputs);
-	} else {
+	else
 		clear_bit(MHL, &motg->inputs);
-		queue = true;
-	}
 
-	if (queue && phy->state != OTG_STATE_UNDEFINED)
-		schedule_work(&motg->sm_work);
+	queue_work(system_nrt_wq, &motg->sm_work);
+	return;
 }
 
-static bool msm_otg_is_mhl(struct msm_otg *motg)
+static int msm_otg_is_mhl(struct msm_otg *motg)
 {
-	struct usb_phy *phy = &motg->phy;
-	int is_mhl, ret;
+#ifdef CONFIG_MHL
+	struct otg_transceiver *otg = &motg->otg;
+	int is_mhl = MHL_DISCOVERY_RESULT_USB;
 
-	ret = mhl_device_discovery(motg->pdata->mhl_dev_name, &is_mhl);
-	if (ret || is_mhl != MHL_DISCOVERY_RESULT_MHL) {
-		/*
-		 * MHL driver calls our callback saying that MHL connected
-		 * if RID_GND is detected.  But at later part of discovery
-		 * it may figure out MHL is not connected and returns
-		 * false. Hence clear MHL input here.
-		 */
-		clear_bit(MHL, &motg->inputs);
-		dev_dbg(phy->dev, "MHL device not found\n");
-		return false;
+	if (motg->pdata->mhl_dev_name) {
+		dev_info(otg->dev, "Entering into Device Discovery\n");
+		mhl_device_discovery(motg->pdata->mhl_dev_name, &is_mhl);
+		dev_info(otg->dev,
+			"Exited from Device Discovery, %s device found\n",
+			(MHL_DISCOVERY_RESULT_MHL == is_mhl) ? "MHL" : "USB");
 	}
 
-	set_bit(MHL, &motg->inputs);
-	dev_dbg(phy->dev, "MHL device found\n");
-	return true;
+	if (MHL_DISCOVERY_RESULT_MHL == is_mhl)
+		set_bit(MHL, &motg->inputs);
+
+	return (MHL_DISCOVERY_RESULT_MHL == is_mhl);
+#else
+	return 0;
+#endif
 }
 
 static bool msm_chg_mhl_detect(struct msm_otg *motg)
 {
-	bool ret, id;
-	unsigned long flags;
+	struct otg_transceiver *otg = &motg->otg;
+	u32 int_sts;
+	bool ret = false;
 
-	if (!motg->mhl_enabled)
-		return false;
+	if (!aca_enabled())
+		return ret;
 
-	local_irq_save(flags);
-	id = irq_read_line(motg->pdata->pmic_id_irq);
-	local_irq_restore(flags);
-
-	if (id)
-		return false;
-
-	mhl_det_in_progress = true;
-	ret = msm_otg_is_mhl(motg);
-	mhl_det_in_progress = false;
+	int_sts = ulpi_read(otg, 0x87);
+	/* check MHL, when ID_GND */
+	if (((int_sts & 0x1C) == 0x04) && msm_otg_is_mhl(motg))
+		ret = true;
 
 	return ret;
 }
@@ -2009,36 +2005,6 @@ static const char *chg_to_string(enum usb_chg_type chg_type)
 	}
 }
 
-#define MSM_CHECK_TA_DELAY (5 * HZ)
-#define PORTSC_LS  (3 << 10) /* Read - Port's Line status */
-static void msm_ta_detect_work(struct work_struct *w)
-{
-	struct msm_otg *motg = container_of(w, struct msm_otg, check_ta_work.work);
-	struct usb_otg *otg = motg->phy.otg;
-
-	pr_debug("msm_ta_detect_work: ta detection work\n");
-
-	/* Presence of FRame Index or FRINDEX rollover implies USB communication */
-	if( (readl(USB_FRINDEX) != 0) || ( readl(USB_USBSTS) & (1<<3) ) ) {
-		pr_info("msm_ta_detect_work: USB exit ta detection - frindex\n");
-		return;
-	}
-
-	if ((readl(USB_PORTSC) & PORTSC_LS) == PORTSC_LS) {
-		pr_info("msm_ta_detect_work: ta dectection success\n");
-		/* inform to user space that SDP is no longer detected */
-		msm_otg_notify_charger(motg, 0);
-		motg->chg_state = USB_CHG_STATE_DETECTED;
-		motg->chg_type = USB_DCP_CHARGER;
-		motg->cur_power = 0;
-		msm_otg_start_peripheral(otg, 0);
-		otg->phy->state = OTG_STATE_B_IDLE;
-		schedule_work(&motg->sm_work);
-		return;
-	}
-	schedule_delayed_work(&motg->check_ta_work, MSM_CHECK_TA_DELAY);
-}
-
 static void msm_otg_start_recheck_chgtype(struct otg_transceiver *otg,
 					unsigned long delay)
 {
@@ -2088,6 +2054,11 @@ static void msm_chg_detect_work(struct work_struct *w)
 	u32 line_state, dm_vlgc;
 	unsigned long delay;
 
+	if (test_bit(MHL, &motg->inputs)) {
+		dev_dbg(otg->dev, "detected MHL, escape chg detection work\n");
+		return;
+	}
+
 	dev_dbg(phy->dev, "chg detection work\n");
 
 	if (test_bit(MHL, &motg->inputs)) {
@@ -2105,17 +2076,7 @@ static void msm_chg_detect_work(struct work_struct *w)
 		delay = MSM_CHG_DCD_POLL_TIME;
 		break;
 	case USB_CHG_STATE_WAIT_FOR_DCD:
-		if (slimport_is_connected()) {
-			msm_chg_block_off(motg);
-			motg->chg_state = USB_CHG_STATE_DETECTED;
-			motg->chg_type = USB_SDP_CHARGER;
-			queue_work(system_nrt_wq, &motg->sm_work);
-			return;
-		}
 		if (msm_chg_mhl_detect(motg)) {
-			msm_chg_block_off(motg);
-			motg->chg_state = USB_CHG_STATE_DETECTED;
-			motg->chg_type = USB_INVALID_CHARGER;
 			queue_work(system_nrt_wq, &motg->sm_work);
 			return;
 		}
@@ -2339,6 +2300,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 			pr_err("couldn't get usb power supply\n");
 		otg->phy->state = OTG_STATE_B_IDLE;
 		if (!test_bit(B_SESS_VLD, &motg->inputs) &&
+				!test_bit(MHL, &motg->inputs) &&
 				test_bit(ID, &motg->inputs)) {
 			pm_runtime_put_noidle(otg->phy->dev);
 			pm_runtime_suspend(otg->phy->dev);
@@ -2346,19 +2308,16 @@ static void msm_otg_sm_work(struct work_struct *w)
 		}
 		/* FALL THROUGH */
 	case OTG_STATE_B_IDLE:
+		dev_info(otg->dev, "OTG_STATE_B_IDLE state\n");
 		if (test_bit(MHL, &motg->inputs)) {
-			/* allow LPM */
-			pm_runtime_put_noidle(otg->phy->dev);
-			pm_runtime_suspend(otg->phy->dev);
+			otg->phy->state = OTG_STATE_MHL_DETECTED;
+			queue_work(system_nrt_wq, w);
 		} else if ((!test_bit(ID, &motg->inputs) ||
 				test_bit(ID_A, &motg->inputs)) && otg->host) {
 			pr_debug("!id || id_A\n");
-			if (slimport_is_connected()) {
-				work = 1;
-				break;
-			}
-			if (msm_chg_mhl_detect(motg)) {
-				work = 1;
+			if (msm_otg_is_mhl(motg)) {
+				otg->phy->state = OTG_STATE_MHL_DETECTED;
+				queue_work(system_nrt_wq, w);
 				break;
 			}
 			clear_bit(B_BUS_REQ, &motg->inputs);
@@ -2474,7 +2433,12 @@ static void msm_otg_sm_work(struct work_struct *w)
 		}
 		break;
 	case OTG_STATE_B_PERIPHERAL:
-		if (!test_bit(ID, &motg->inputs) ||
+		dev_info(otg->dev, "OTG_STATE_B_PERIPHERAL state\n");
+		if (test_bit(MHL, &motg->inputs)) {
+			msm_otg_start_peripheral(otg, 0);
+			otg->phy->state = OTG_STATE_MHL_DETECTED;
+			queue_work(system_nrt_wq, w);
+		} else if (!test_bit(ID, &motg->inputs) ||
 				test_bit(ID_A, &motg->inputs) ||
 				test_bit(ID_B, &motg->inputs) ||
 				!test_bit(B_SESS_VLD, &motg->inputs)) {
@@ -2715,11 +2679,19 @@ static void msm_otg_sm_work(struct work_struct *w)
 		break;
 	case OTG_STATE_A_HOST:
 		dev_info(otg->dev, "OTG_STATE_A_HOST state\n");
-		if (test_bit(VBUS_DROP_DET, &motg->inputs)) {
+		if (test_bit(MHL, &motg->inputs)) {
+			msm_otg_start_host(otg, 0);
+			msm_hsusb_vbus_power(motg, 0);
+			otg->phy->state = OTG_STATE_MHL_DETECTED;
+			queue_work(system_nrt_wq, w);
+		} else if (test_bit(VBUS_DROP_DET, &motg->inputs)) {
 			msm_otg_start_host(otg, 0);
 			msm_hsusb_vbus_power(motg, 0);
 			msm_otg_notify_charger(motg, 0);
 			otg->phy->state = OTG_STATE_A_VBUS_ERR;
+#ifdef CONFIG_USB_HOST_EXTRA_NOTIFICATION
+			host_send_uevent(USB_HOST_EXT_EVENT_VBUS_DROP);
+#endif
 		} else if ((test_bit(ID, &motg->inputs) &&
 				!test_bit(ID_A, &motg->inputs)) ||
 				test_bit(A_BUS_DROP, &motg->inputs)) {
@@ -2889,6 +2861,26 @@ static void msm_otg_sm_work(struct work_struct *w)
 			motg->chg_state = USB_CHG_STATE_UNDEFINED;
 			motg->chg_type = USB_INVALID_CHARGER;
 			msm_otg_notify_charger(motg, 0);
+		}
+		break;
+	case OTG_STATE_MHL_DETECTED:
+		dev_info(otg->dev, "OTG_STATE_MHL_DETECTED state\n");
+		cancel_work_sync(&motg->chg_recheck_stop_work);
+		cancel_delayed_work_sync(&motg->chg_work);
+		msm_chg_block_off(motg);
+		motg->chg_type = USB_INVALID_CHARGER;
+		motg->chg_state = USB_CHG_STATE_UNDEFINED;
+		otg->state = OTG_STATE_MHL_CONNECTED;
+		/* fall through */
+	case OTG_STATE_MHL_CONNECTED:
+		dev_info(otg->dev, "OTG_STATE_MHL_CONNECTED state\n");
+		if (!test_bit(MHL, &motg->inputs)
+				&& !test_bit(B_SESS_VLD, &motg->inputs)) {
+			dev_info(otg->dev, "detected the MHL dongle removed\n");
+			set_bit(ID, &motg->inputs);
+			msm_otg_notify_charger(motg, 0);
+			otg->state = OTG_STATE_B_IDLE;
+			queue_work(motg->wq, w);
 		}
 		break;
 	default:
@@ -3862,6 +3854,7 @@ static int __init msm_otg_probe(struct platform_device *pdev)
 	if (motg->pdata->enable_lpm_on_dev_suspend)
 		motg->caps |= ALLOW_LPM_ON_DEV_SUSPEND;
 
+	msm_otg_mhl_register_callback(motg, msm_otg_mhl_notify_online);
 	wake_lock(&motg->wlock);
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);

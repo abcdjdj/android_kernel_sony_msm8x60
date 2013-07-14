@@ -544,9 +544,9 @@ static int ssr_panic_handler(struct notifier_block *this,
 {
 	struct subsys_device *dev;
 
-	list_for_each_entry(dev, &subsystem_list, list)
-		if (dev->desc->crash_shutdown)
-			dev->desc->crash_shutdown(dev->desc);
+	list_for_each_entry(subsys, &subsystem_list, list)
+		if (subsys->name && subsys->crash_shutdown)
+			subsys->crash_shutdown(subsys);
 	return NOTIFY_DONE;
 }
 

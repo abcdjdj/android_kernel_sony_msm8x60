@@ -1363,6 +1363,11 @@ msmsdcc_data_err(struct msmsdcc_host *host, struct mmc_data *data,
 			pr_err("%s: blksz %d, blocks %d\n", __func__,
 			       data->blksz, data->blocks);
 			data->error = -EILSEQ;
+			if ((!strncmp(mmc_hostname(host->mmc), "mmc0", sizeof("mmc0")))
+			    && (host->mmc->ios.timing == MMC_TIMING_UHS_DDR50)) {
+				/* Crash if CRC error happens in DDR50 mode on eMMC. */
+				panic("mmc0: Data CRC error\n");
+			}
 		}
 	} else if (status & MCI_DATATIMEOUT) {
 		/* CRC is optional for the bus test commands, not all
@@ -3279,7 +3284,7 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		/* Card clock frequency must be > 100MHz to enable tuning */
 		clk |= (4 << 14);
 		host->tuning_needed = 1;
-	} else if (ios->timing == MMC_TIMING_UHS_DDR50) {
+	} else if (ios->ddr || ios->timing == MMC_TIMING_UHS_DDR50) {
 		clk |= (3 << 14);
 	} else {
 		clk |= (2 << 14); /* feedback clock */
@@ -3328,6 +3333,108 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 out:
 	mutex_unlock(&host->clk_mutex);
 }
+
+#ifdef CONFIG_MACH_SDCC_BCM_DRIVER
+void mmc_pm_keeppwr_control(struct mmc_host *mmc, int pwr)
+{
+	struct msmsdcc_host *host = mmc_priv(mmc);
+	u32 clk = 0;
+	unsigned long flags;
+
+	if (pwr) {
+		spin_lock_irqsave(&host->lock, flags);
+		if (!atomic_read(&host->clks_on)) {
+			msmsdcc_setup_clocks(host, true);
+			pr_debug("%s : Turning _ON_ clock for SDIO block\n", __func__);
+			atomic_set(&host->clks_on, 1);
+			if (mmc->card && mmc->card->type == MMC_TYPE_SDIO) {
+				if (!host->plat->sdiowakeup_irq) {
+					writel_relaxed(host->mci_irqenable,
+							host->base + MMCIMASK0);
+					dsb();
+					if (host->plat->mpm_sdiowakeup_int &&
+						(mmc->pm_flags & MMC_PM_WAKE_SDIO_IRQ))
+						msmsdcc_cfg_mpm_sdiowakeup(host, SDC_DAT1_DISWAKE);
+					msmsdcc_disable_irq_wake(host);
+				} else if (!(mmc->pm_flags & MMC_PM_WAKE_SDIO_IRQ)) {
+					writel_relaxed(host->mci_irqenable,
+							host->base + MMCIMASK0);
+				}
+			}
+		}
+		spin_unlock_irqrestore(&host->lock, flags);
+
+		if (host->clk_rate)
+			clk_set_rate(host->clk, host->clk_rate);
+		/*
+		 * give atleast 2 MCLK cycles delay for clocks
+		 * and SDCC core to stabilize
+		 */
+		msmsdcc_delay(host);
+		clk |= MCI_CLK_ENABLE;
+	}
+
+	if (pwr)
+		clk |= MCI_CLK_WIDEBUS_4;
+	else
+		clk |= MCI_CLK_WIDEBUS_1;
+
+	if (msmsdcc_is_pwrsave(host))
+		clk |= MCI_CLK_PWRSAVE;
+
+	clk |= MCI_CLK_FLOWENA;
+	clk |= MCI_CLK_SELECTIN; /* feedback clock */
+
+	spin_lock_irqsave(&host->lock, flags);
+	if (!atomic_read(&host->clks_on)) {
+		/* force the clocks to be on */
+		msmsdcc_setup_clocks(host, true);
+		/*
+		 * give atleast 2 MCLK cycles delay for clocks
+		 * and SDCC core to stabilize
+		 */
+		msmsdcc_delay(host);
+	}
+	writel_relaxed(clk, host->base + MMCICLOCK);
+	msmsdcc_delay(host);
+
+	if (!atomic_read(&host->clks_on)) {
+		/* force the clocks to be off */
+		msmsdcc_setup_clocks(host, false);
+		/*
+		 * give atleast 2 MCLK cycles delay for clocks
+		 * and SDCC core to stabilize
+		 */
+		msmsdcc_delay(host);
+	}
+
+	if (!pwr && atomic_read(&host->clks_on)) {
+		if (mmc->card && mmc->card->type == MMC_TYPE_SDIO) {
+			if (!host->plat->sdiowakeup_irq) {
+				writel_relaxed(MCI_SDIOINTMASK,
+						host->base + MMCIMASK0);
+				mb();
+				if (host->plat->mpm_sdiowakeup_int &&
+					(mmc->pm_flags & MMC_PM_WAKE_SDIO_IRQ))
+					msmsdcc_cfg_mpm_sdiowakeup(host, SDC_DAT1_ENWAKE);
+				msmsdcc_enable_irq_wake(host);
+			} else if (mmc->pm_flags & MMC_PM_WAKE_SDIO_IRQ) {
+				writel_relaxed(0, host->base + MMCIMASK0);
+			} else {
+				writel_relaxed(MCI_SDIOINTMASK,
+						host->base + MMCIMASK0);
+			}
+			msmsdcc_delay(host);
+		}
+		msmsdcc_setup_clocks(host, false);
+		pr_debug("%s: %s: Turning _OFF_ clock for SDIO block\n",
+			mmc_hostname(host->mmc), __func__);
+
+		atomic_set(&host->clks_on, 0);
+	}
+	spin_unlock_irqrestore(&host->lock, flags);
+}
+#endif
 
 int msmsdcc_set_pwrsave(struct mmc_host *mmc, int pwrsave)
 {
@@ -6392,6 +6499,7 @@ msmsdcc_runtime_resume(struct device *dev)
 	return 0;
 }
 
+#define MSM_EXT_MMC_IDLE_TIMEOUT (MSM_MMC_DEFAULT_IDLE_TIMEOUT * 10)
 static int msmsdcc_runtime_idle(struct device *dev)
 {
 	struct mmc_host *mmc = dev_get_drvdata(dev);
@@ -6401,7 +6509,10 @@ static int msmsdcc_runtime_idle(struct device *dev)
 		return 0;
 
 	/* Idle timeout is not configurable for now */
-	pm_schedule_suspend(dev, host->idle_tout_ms);
+	if (mmc->caps & MMC_CAP_NONREMOVABLE)
+		pm_schedule_suspend(dev, MSM_MMC_DEFAULT_IDLE_TIMEOUT);
+	else
+		pm_schedule_suspend(dev, MSM_EXT_MMC_IDLE_TIMEOUT);
 
 	return -EAGAIN;
 }

@@ -41,6 +41,7 @@
 #define NO_CHG   0x00
 #define USB_CHG  0x01
 #define WALL_CHG 0x02
+#define CRADLE_CHG 0x04
 
 #ifndef DEBUG
 #define MUTEX_LOCK(x) do {						\
@@ -108,6 +109,9 @@ struct check_data {
 struct charger_ctrl {
 	u8 onoff;
 	u16 psy_curr;
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	u16 psy_curr_cradle;
+#endif
 	u16 volt;
 	u16 curr;
 };
@@ -154,6 +158,9 @@ struct battery_chargalg_driver {
 	u8 step_charging_idx;
 #endif
 	u16 chg_curr;
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	u16 chg_curr_cradle;
+#endif
 	bool connect_changed;
 	s32 enable_ambient_temp;
 
@@ -496,6 +503,42 @@ static int battery_chargalg_update_online_status(
 			"USB charger disconnected\n");
 		}
 	} else if (POWER_SUPPLY_TYPE_MAINS == type) {
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+		if (alg->pdata->get_ac_online_status) {
+			int ac = alg->pdata->get_ac_online_status();
+			int cradle = alg->chg_connected & CRADLE_CHG;
+			int curr_wall = ac & WALL_CHG;
+			int curr_cradle = ac & CRADLE_CHG;
+
+			if (IS_CHG_CONNECTED(wall, curr_wall)) {
+				update++;
+				alg->chg_connected |= WALL_CHG;
+				dev_dbg(alg->dev,
+				"Wall charger connected\n");
+			}
+
+			if (IS_CHG_DISCONNECTED(wall, curr_wall)) {
+				update++;
+				alg->chg_connected &= ~WALL_CHG;
+				dev_dbg(alg->dev,
+				"Wall charger disconnected\n");
+			}
+
+			if (IS_CHG_CONNECTED(cradle, curr_cradle)) {
+				update++;
+				alg->chg_connected |= CRADLE_CHG;
+				dev_dbg(alg->dev,
+				"Cradle charger connected\n");
+			}
+
+			if (IS_CHG_DISCONNECTED(cradle, curr_cradle)) {
+				update++;
+				alg->chg_connected &= ~CRADLE_CHG;
+				dev_dbg(alg->dev,
+				"Cradle charger disconnected\n");
+			}
+		}
+#else
 		if (IS_CHG_CONNECTED(wall, curr_val)) {
 			update++;
 			alg->chg_connected |= WALL_CHG;
@@ -509,6 +552,7 @@ static int battery_chargalg_update_online_status(
 			dev_dbg(alg->dev,
 			"Wall charger disconnected\n");
 		}
+#endif
 	}
 	return update;
 }
@@ -657,6 +701,19 @@ static void battery_chargalg_ext_pwr_changed_worker(struct work_struct *work)
 			"Supply current limit %u mA from USB", curr);
 		}
 
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+		curr = 0;
+		if (alg->pdata->get_supply_current_limit_cradle &&
+			(alg->chg_connected & CRADLE_CHG))
+			curr =
+			(u16)alg->pdata->get_supply_current_limit_cradle();
+		if (curr != alg->chg_curr_cradle) {
+			updated++;
+			alg->chg_curr_cradle = curr;
+			dev_dbg(alg->dev,
+			"Supply current limit %u mA from Cradle", curr);
+		}
+#endif
 		/* chg_connected will should be kept with "true"
 		 * until all charger is disconnected or
 		 * setup_exchanged_power_supply function is called.
@@ -669,6 +726,9 @@ static void battery_chargalg_ext_pwr_changed_worker(struct work_struct *work)
 	} else if (old_connected) {
 		updated++;
 		alg->chg_curr = 0;
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+		alg->chg_curr_cradle = 0;
+#endif
 		alg->connect_changed = false;
 		dev_dbg(alg->dev, "updated=%d connection:[%d -> %d]\n",
 				updated, old_connected, alg->chg_connected);
@@ -1396,6 +1456,41 @@ static void battery_chargalg_control_step(struct battery_chargalg_driver *alg)
 static void battery_chargalg_charger_setting(
 		struct battery_chargalg_driver *alg)
 {
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	if (alg->ctrl.onoff &&
+	    alg->connect_changed) {
+		if (alg->pdata->setup_exchanged_power_supply)
+			(void)alg->pdata->setup_exchanged_power_supply(
+						alg->chg_connected);
+
+		if (alg->pdata->set_input_voltage_dpm_usb &&
+		    alg->chg_connected & (USB_CHG | WALL_CHG))
+			(void)alg->pdata->set_input_voltage_dpm_usb(
+					alg->chg_connected & USB_CHG);
+
+		if (alg->pdata->set_input_voltage_dpm_cradle &&
+		    alg->chg_connected & CRADLE_CHG)
+			(void)alg->pdata->set_input_voltage_dpm_cradle();
+
+		alg->connect_changed = false;
+	}
+
+	if (alg->pdata->set_input_current_limit_dual) {
+		int update = 0;
+		if (alg->chg_curr != alg->ctrl.psy_curr) {
+			alg->ctrl.psy_curr = alg->chg_curr;
+			update++;
+		}
+		if (alg->chg_curr_cradle != alg->ctrl.psy_curr_cradle) {
+			alg->ctrl.psy_curr_cradle = alg->chg_curr_cradle;
+			update++;
+		}
+		if (update)
+			(void)alg->pdata->set_input_current_limit_dual(
+					alg->ctrl.psy_curr,
+					alg->ctrl.psy_curr_cradle);
+	}
+#else
 	if ((alg->ctrl.onoff && alg->connect_changed)
 		|| (alg->eoc.need_recharge)) {
 		if (alg->pdata->setup_exchanged_power_supply)
@@ -1412,6 +1507,8 @@ static void battery_chargalg_charger_setting(
 						alg->ctrl.psy_curr);
 		}
 	}
+
+#endif
 
 	dev_dbg(alg->dev,
 		"dbg_data:%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\n",

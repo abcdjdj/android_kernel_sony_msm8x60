@@ -1,3 +1,5 @@
+#ifndef LINUX_BMP180_MODULE_H
+#define LINUX_BMP180_MODULE_H
 /*
  * Copyright (c) 2011 Sony Ericsson Mobile Communications AB.
  *
@@ -18,8 +20,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
-#ifndef LINUX_BMP180_MODULE_H
-#define LINUX_BMP180_MODULE_H
 
 struct bmp180_platform_data {
 	int (*gpio_setup)(bool request);

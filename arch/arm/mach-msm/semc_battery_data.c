@@ -1,6 +1,7 @@
 /* kernel/arch/arm/mach-msm/semc_battery_data.c
  *
- * Copyright (C) 2010 Sony Ericsson Mobile Communications AB.
+ * Copyright (C) 2011-2012 Sony Ericsson Mobile Communications AB.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * Author: Imre Sunyi <imre.sunyi@sonyericsson.com>
  *
@@ -10,28 +11,50 @@
  * of the License, or (at your option) any later version.
  */
 
+#include <linux/slab.h>
 #include <linux/ctype.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
-#include <linux/slab.h>
 #include <linux/stat.h>
+#include <linux/msm_adc.h>
+#include <linux/hrtimer.h>
+#include <asm/atomic.h>
+#include <linux/export.h>
 #include <linux/module.h>
-#include <mach/oem_rapi_client.h>
+
 #include <mach/semc_battery_data.h>
 
-#define OEM_RAPI_RECONNECT_S 5
+#define INTERPOLATE(IX, X1, Y1, X2, Y2) \
+	((Y1) + (((signed)((Y2) - (Y1))*(signed)((IX) - (X1)))/ \
+	(signed)((X2) - (X1))))
+
+#define LOW_NTC_RESISTANCE   8200
+#define HIGH_NTC_RESISTANCE  180000
+#define HIGHEST_RESISTANCE_TYPE1 70000
+
+#define POLLING_CHARGING_TIMER 2
+#define POLLING_NOCHARGE_TIMER 10
+
+#define BATTERY_THERM_VOLTAGE_MV 2200
+#define BATTERY_THERM_DIVIDER_RESISTANCE_OHM 100000
+
+#define DEFAULT_TEMPERATURE_UNKNOWN_BATT_TYPE 20
+
+#define AMBIENT_TEMP_DIVIDER 1000
+
+#define RESISTANCE_10_MOHM 10
 
 #ifdef DEBUG
 #define MUTEX_LOCK(x) do {						\
-	struct data_info *d = container_of(x, struct data_info, lock);	\
-	dev_dbg(d->dev, "Locking mutex in %s\n", __func__);		\
+	struct data_info *d = container_of(x, struct data_info, lock);\
+	dev_vdbg(d->dev, " Locking mutex in %s\n", __func__);\
 	mutex_lock(x);							\
 } while (0)
 #define MUTEX_UNLOCK(x) do {						\
-	struct data_info *d = container_of(x, struct data_info, lock);	\
-	dev_dbg(d->dev, "Unlocking mutex in %s\n", __func__);		\
+	struct data_info *d = container_of(x, struct data_info, lock);\
+	dev_vdbg(d->dev, " Unlocking mutex in %s\n", __func__);\
 	mutex_unlock(x);						\
 } while (0)
 #else
@@ -39,21 +62,17 @@
 #define MUTEX_UNLOCK(x) mutex_unlock(x)
 #endif /* DEBUG */
 
-/* #define DEBUG_FS */
-
 #ifdef DEBUG_FS
 struct override_value {
 	u8 active;
 	int value;
 };
+#endif /* DEBUG_FS */
 
 enum {
-	BATT_ID_UNKNOWN = 0,
-	BATT_ID_TYPE1,
-	BATT_ID_TYPE2,
-	BATT_VOLT,
+	PMIC_THERM = 0,
+	MSM_THERM,
 };
-#endif /* DEBUG_FS */
 
 enum battery_technology {
 	BATTERY_TECHNOLOGY_UNKNOWN = 0,
@@ -61,75 +80,97 @@ enum battery_technology {
 	BATTERY_TECHNOLOGY_TYPE2
 };
 
-struct battery_data {
-	enum battery_technology technology;
-	u32 cap_percent;
-	s8 temp_celsius;
-	s8 temp_celsius_amb;
-};
-
-struct notify_platform {
-	u8 charging; /* 0 -> no, 1 -> yes */
-	u8 battery_full;
-	u16 battery_charge_current;
-	u16 charger_charge_current;
-};
-
 struct data_info {
 	struct power_supply bdata_ps;
 	struct device *dev;
-	struct battery_data bdata;
-	struct notify_platform notify;
-	u8 battery_ovp;
-	u8 use_fuelgauge;
-
-	u8 notify_changed;
-	u8 ovp_changed;
-
 	struct work_struct external_change_work;
-	struct delayed_work oem_rapi_client_start_work;
-
-	struct msm_rpc_client *rpc_client;
+	struct work_struct timer_work;
+	struct workqueue_struct *wq;
 	struct mutex lock;
+	struct hrtimer timer;
+	atomic_t suspend_lock;
+	atomic_t got_bdata;
 
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-	int health;
-#else
-	int (*set_battery_health)(int health);
-#endif
+	enum battery_technology technology;
+	int temp_celsius;
+	int temp_celsius_amb;
+	int charge_status;
+
+	int pmic_therm;
+	int msm_therm;
+
+	struct semc_battery_platform_data *pdata;
 
 #ifdef DEBUG_FS
 	struct override_value temperature_debug;
 	struct override_value technology_debug;
 	struct override_value temperature_amb_debug;
-#endif
+#endif /* DEBUG_FS */
+};
+
+struct resistance_vs_temperature_semc {
+	u32  resistance;
+	s8    temperature;
+};
+
+/**
+ ** Type 1 Lithium-Ion and Lithium-Polymer battery (Co-based).
+ **/
+static const struct resistance_vs_temperature_semc
+fallback_resistance_vs_temperature_type1[] = {
+	{9200,  100},
+	{11800, 70},
+	{12500, 65},
+	{13500, 60},
+	{14600, 55},
+	{15900, 50},
+	{17500, 45},
+	{19400, 40},
+	{21700, 35},
+	{24300, 30},
+	{27400, 25},
+	{31000, 20},
+	{35000, 15},
+	{39400, 10},
+	{44200, 5 },
+	{49200, 0 },
+	{67400, -20}
+};
+
+/**
+ ** Type 2 Lithium-Polymer battery (Co/Nb/Ni-based).
+ **/
+static const struct resistance_vs_temperature_semc
+fallback_resistance_vs_temperature_type2[] = {
+	{73900,  100},
+	{80900,  70},
+	{83000,  65},
+	{85600,  60},
+	{88600,  55},
+	{92200,  50},
+	{96500,  45},
+	{101500, 40},
+	{107300, 35},
+	{113800, 30},
+	{121000, 25},
+	{128700, 20},
+	{136800, 15},
+	{144900, 10},
+	{152700, 5},
+	{160000, 0},
+	{180700, -20}
 };
 
 static enum power_supply_property batt_props[] = {
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-	POWER_SUPPLY_PROP_HEALTH,
-#endif
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TEMP_AMBIENT,
 };
 
-static enum power_supply_property batt_props_with_fg[] = {
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-	POWER_SUPPLY_PROP_HEALTH,
-#endif
-	POWER_SUPPLY_PROP_TECHNOLOGY,
-	POWER_SUPPLY_PROP_CAPACITY,
-	POWER_SUPPLY_PROP_TEMP,
-	POWER_SUPPLY_PROP_TEMP_AMBIENT,
-};
+static int semc_battery_read_adc(int channel, int *read_measurement,
+				int *read_physical);
 
 #ifdef DEBUG_FS
-static int msm_get_event(struct data_info *di, u32 event, u8 event_switch,
-			 u32 *value);
-static ssize_t semc_battery_show_property(struct device *dev,
-					  struct device_attribute *attr,
-					  char *buf);
 static ssize_t store_temperature(struct device *pdev,
 				 struct device_attribute *attr,
 				 const char *pbuf,
@@ -142,16 +183,21 @@ static ssize_t store_temperature_ambient(struct device *pdev,
 				 struct device_attribute *attr,
 				 const char *pbuf,
 				 size_t count);
+#endif /* DEBUG_FS */
+
+static ssize_t semc_battery_show_therm(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
 
 static struct device_attribute semc_battery_attrs[] = {
-	__ATTR(batt_id_unknown, S_IRUGO, semc_battery_show_property, NULL),
-	__ATTR(batt_id_type1, S_IRUGO, semc_battery_show_property, NULL),
-	__ATTR(batt_id_type2, S_IRUGO, semc_battery_show_property, NULL),
-	__ATTR(batt_volt, S_IRUGO, semc_battery_show_property, NULL),
+	__ATTR(pmic_therm, S_IRUGO, semc_battery_show_therm, NULL),
+	__ATTR(msm_therm, S_IRUGO, semc_battery_show_therm, NULL),
+#ifdef DEBUG_FS
 	__ATTR(set_temperature, S_IWUGO, NULL, store_temperature),
 	__ATTR(set_technology, S_IWUGO, NULL, store_technology),
 	__ATTR(set_temperature_ambient, S_IWUGO, NULL,
 	       store_temperature_ambient),
+#endif /* DEBUG_FS */
 };
 
 static int semc_battery_create_attrs(struct device *dev)
@@ -165,52 +211,11 @@ static int semc_battery_create_attrs(struct device *dev)
 	return 0;
 
 semc_create_attrs_failed:
-	dev_err(dev, "Failed creating semc battery attrs.\n");
+	dev_err(dev, " Failed creating semc battery attrs.\n");
 	while (i--)
 		device_remove_file(dev, &semc_battery_attrs[i]);
 
 	return -EIO;
-}
-
-static ssize_t semc_battery_show_property(struct device *dev,
-					  struct device_attribute *attr,
-					  char *buf)
-{
-	int rc = 0;
-	const ptrdiff_t offs = attr - semc_battery_attrs;
-	struct power_supply *ps = dev_get_drvdata(dev);
-	struct data_info *di;
-	u32 event;
-
-	if (!ps)
-		return -EPERM;
-	di = container_of(ps, struct data_info, bdata_ps);
-
-	switch (offs) {
-	case BATT_ID_UNKNOWN:
-		rc = msm_get_event(di, OEM_RAPI_CLIENT_EVENT_BATT_ID_GET, 0,
-				   &event);
-		break;
-	case BATT_ID_TYPE1:
-		rc = msm_get_event(di, OEM_RAPI_CLIENT_EVENT_BATT_ID_TYPE1_GET,
-				   0, &event);
-		break;
-	case BATT_ID_TYPE2:
-		rc = msm_get_event(di, OEM_RAPI_CLIENT_EVENT_BATT_ID_TYPE2_GET,
-				   0, &event);
-		break;
-	case BATT_VOLT:
-		rc = msm_get_event(di, OEM_RAPI_CLIENT_EVENT_BATT_MV_GET, 0,
-				   &event);
-		break;
-	default:
-		rc = -EINVAL;
-	}
-
-	if (!rc)
-		rc = scnprintf(buf, PAGE_SIZE, "%u\n", event);
-
-	return rc;
 }
 
 static void semc_battery_remove_attrs(struct device *dev)
@@ -221,6 +226,7 @@ static void semc_battery_remove_attrs(struct device *dev)
 		(void)device_remove_file(dev, &semc_battery_attrs[i]);
 }
 
+#ifdef DEBUG_FS
 static int read_sysfs_interface(const char *pbuf, s32 *pvalue, u8 base)
 {
 	long long val;
@@ -235,7 +241,44 @@ static int read_sysfs_interface(const char *pbuf, s32 *pvalue, u8 base)
 
 	return rc;
 }
+#endif /* DEBUG_FS */
 
+static ssize_t semc_battery_show_therm(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	int rc = 0;
+	const ptrdiff_t offs = attr - semc_battery_attrs;
+	struct power_supply *ps = dev_get_drvdata(dev);
+	struct data_info *di;
+	int val = 0;
+
+	if (!ps)
+		return -EPERM;
+	di = container_of(ps, struct data_info, bdata_ps);
+
+	switch (offs) {
+	case PMIC_THERM:
+		rc = semc_battery_read_adc(CHANNEL_ADC_DIE_TEMP, &val, NULL);
+		if (rc < 0)
+			dev_err(dev, "read_adc(DIE_TEMP) failed. ret=%d\n",
+			rc);
+		break;
+	case MSM_THERM:
+		rc = semc_battery_read_adc(CHANNEL_ADC_MSM_THERM, &val, NULL);
+		if (rc < 0)
+			dev_err(dev, "read_adc(MSM_THERM) failed. ret=%d\n",
+			rc);
+		break;
+	default:
+		rc = -EINVAL;
+	}
+	if (!rc)
+		rc = scnprintf(buf, PAGE_SIZE, "%d\n", val);
+	return rc;
+}
+
+#ifdef DEBUG_FS
 static ssize_t store_temperature(struct device *pdev,
 				 struct device_attribute *attr,
 				 const char *pbuf,
@@ -262,7 +305,7 @@ static ssize_t store_temperature(struct device *pdev,
 		power_supply_changed(&di->bdata_ps);
 	} else {
 		dev_err(pdev, "Wrong input to sysfs set_temperature. "
-			"Expect [-21..100]. -21 releases the debug value\n");
+		       "Expect [-21..100]. -21 releases the debug value\n");
 		rc = -EINVAL;
 	}
 
@@ -296,8 +339,8 @@ static ssize_t store_technology(struct device *pdev,
 		power_supply_changed(&di->bdata_ps);
 	} else {
 		dev_err(pdev,
-			"Wrong input to sysfs set_technology. Expect [-1..2]. "
-			"-1 releases the debug value\n");
+		       "Wrong input to sysfs set_technology. Expect [-1..2]"
+		       ". -1 releases the debug value\n");
 		rc = -EINVAL;
 	}
 
@@ -330,7 +373,7 @@ static ssize_t store_temperature_ambient(struct device *pdev,
 		power_supply_changed(&di->bdata_ps);
 	} else {
 		dev_err(pdev, "Wrong input to sysfs set_temperature_ambient. "
-			"Expect [-21..100]. -21 releases the debug value\n");
+		       "Expect [-21..100]. -21 releases the debug value\n");
 		rc = -EINVAL;
 	}
 
@@ -338,146 +381,111 @@ static ssize_t store_temperature_ambient(struct device *pdev,
 }
 #endif /* DEBUG_FS */
 
-static int cutoff_level_cb(
-		struct oem_rapi_client_streaming_func_cb_arg *arg,
-		struct oem_rapi_client_streaming_func_cb_ret *ret)
+static int semc_battery_read_adc(int channel, int *read_measurement,
+				int *read_physical)
 {
-	if (arg && OEM_RAPI_SERVER_EVENT_CUTOFF_CB_EVENT == arg->event) {
-		struct data_info *di = arg->handle;
+	struct power_supply *ps = power_supply_get_by_name(SEMC_BDATA_NAME);
+	struct data_info *di = container_of(ps, struct data_info, bdata_ps);
+	int ret;
+	void *h;
+	struct adc_chan_result adc_chan_result;
+	struct completion  conv_complete_evt;
 
-		dev_dbg(di->dev, "%s\n", __func__);
+	if (!read_measurement && !read_physical)
+		return -EINVAL;
 
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-		MUTEX_LOCK(&di->lock);
-		di->health = POWER_SUPPLY_HEALTH_DEAD;
-		MUTEX_UNLOCK(&di->lock);
-		power_supply_changed(&di->bdata_ps);
-#else
-		if (di && di->set_battery_health)
-			(void)di->set_battery_health(POWER_SUPPLY_HEALTH_DEAD);
-#endif /* CONFIG_SEMC_BATTERY_SHOW_HEALTH */
+	dev_dbg(di->dev, "called for %d\n", channel);
+	ret = adc_channel_open(channel, &h);
+	if (ret) {
+		dev_err(di->dev, "couldnt open channel %d ret=%d\n",
+			channel, ret);
+		goto out;
 	}
+	init_completion(&conv_complete_evt);
+	ret = adc_channel_request_conv(h, &conv_complete_evt);
+	if (ret) {
+		dev_err(di->dev, "couldnt request conv channel %d ret=%d\n",
+			channel, ret);
+		adc_channel_close(h);
+		goto out;
+	}
+	ret = wait_for_completion_interruptible(&conv_complete_evt);
+	if (ret) {
+		dev_err(di->dev, "wait interrupted channel %d ret=%d\n",
+			channel, ret);
+		adc_channel_close(h);
+		goto out;
+	}
+	ret = adc_channel_read_result(h, &adc_chan_result);
+	if (ret) {
+		dev_err(di->dev, "couldnt read result channel %d ret=%d\n",
+			channel, ret);
+		adc_channel_close(h);
+		goto out;
+	}
+	ret = adc_channel_close(h);
+	if (ret)
+		dev_err(di->dev, "couldnt close channel %d ret=%d\n",
+			channel, ret);
+	if (read_measurement) {
+		*read_measurement = (int)adc_chan_result.measurement;
+		dev_dbg(di->dev, "done for %d measurement=%d\n",
+			channel, *read_measurement);
+	}
+	if (read_physical) {
+		*read_physical = adc_chan_result.physical;
+		dev_dbg(di->dev, "done for %d physical=%d\n",
+			channel, *read_physical);
+	}
+	return ret;
+out:
+	dev_dbg(di->dev, "done for %d\n", channel);
+	return ret;
+
+}
+
+static int compensate_batt_therm(struct data_info *di, int mv)
+{
+	int curr = -1;
+	int mv_cmp;
+	int connector_resistance
+		= di->pdata->ddata->battery_connector_resistance;
+
+	if (di->pdata->get_current_average)
+		curr = di->pdata->get_current_average();
+
+	mv_cmp = mv * 1000 - curr *
+			(RESISTANCE_10_MOHM + connector_resistance);
+	mv_cmp /= 1000;
+
+	dev_dbg(di->dev, "%s() curr=%d mv=%d mv_cmp=%d mv_dlt=%d\n",
+		__func__, curr, mv, mv_cmp, mv_cmp - mv);
+
+	return mv_cmp;
+}
+
+static s32 get_batt_therm_resistance(struct data_info *di, int *resistance)
+{
+	int mv;
+	int mv_compensate;
+	int rc = semc_battery_read_adc(CHANNEL_ADC_BATT_THERM, &mv, NULL);
+
+	if (rc < 0)
+		return rc;
+
+	mv_compensate = compensate_batt_therm(di, mv);
+
+	if (mv_compensate >= BATTERY_THERM_VOLTAGE_MV)
+		*resistance = UINT_MAX;
+	else
+		*resistance =
+			(mv_compensate * BATTERY_THERM_DIVIDER_RESISTANCE_OHM) /
+			(BATTERY_THERM_VOLTAGE_MV - mv);
+
+	dev_dbg(di->dev, "%s() mv=%d resistance=%d\n",
+		__func__, mv, *resistance);
 
 	return 0;
-}
-
-static int bdata_change_cb(
-	struct oem_rapi_client_streaming_func_cb_arg *arg,
-	struct oem_rapi_client_streaming_func_cb_ret *ret)
-{
-	int rc = 0;
-
-	if (arg && OEM_RAPI_SERVER_EVENT_NOTIFY_BDATA_CB_EVENT == arg->event &&
-	    sizeof(struct battery_data) == arg->in_len) {
-		struct data_info *di = arg->handle;
-
-		if (di) {
-			dev_dbg(di->dev, "%s\n", __func__);
-
-			MUTEX_LOCK(&di->lock);
-			di->bdata = *(struct battery_data *)arg->input;
-			MUTEX_UNLOCK(&di->lock);
-			power_supply_changed(&di->bdata_ps);
-
-			dev_dbg(di->dev, "%s return\n", __func__);
-		} else {
-			rc = -EINVAL;
-		}
-	}
-
-	return rc;
-}
-
-static int set_platform_callbacks(struct data_info *di)
-{
-	struct oem_rapi_client_streaming_func_arg client_arg = {0};
-	struct oem_rapi_client_streaming_func_ret client_ret = {0};
-	int rc;
-	char dummy;
-
-	MUTEX_LOCK(&di->lock);
-	if (!di->rpc_client) {
-		MUTEX_UNLOCK(&di->lock);
-		return -ESRCH;
-	}
-	MUTEX_UNLOCK(&di->lock);
-
-	/* Common setup */
-	client_arg.handle = di;
-	/* "input" must be set to something even if "in_len" is zero.
-	 *  Otherwise the size (0) isn't sent and the server will reject the
-	 * RPC message.
-	 */
-	client_arg.input = &dummy;
-
-	/* Setup battery cutoff level callback */
-	client_arg.event = OEM_RAPI_CLIENT_EVENT_CUTOFF_LEVEL_CB_REGISTER;
-	client_arg.cb_func = cutoff_level_cb;
-
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc) {
-		dev_err(di->dev, "Failed register cutoff level. Error %d\n",
-			rc);
-		goto set_callbacks_exit;
-	}
-
-	/* Setup battery data change callback */
-	client_arg.event = OEM_RAPI_CLIENT_EVENT_NOTIFY_BDATA_CB_REGISTER_SET;
-	client_arg.cb_func = bdata_change_cb;
-
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc)
-		dev_err(di->dev, "Failed register bdata change. Error %d\n",
-			rc);
-
-set_callbacks_exit:
-	return rc;
-}
-
-static void clear_platform_callbacks(struct data_info *di)
-{
-	struct oem_rapi_client_streaming_func_arg client_arg = {0};
-	struct oem_rapi_client_streaming_func_ret client_ret = {0};
-	int rc;
-	char dummy;
-
-	MUTEX_LOCK(&di->lock);
-	if (!di->rpc_client) {
-		MUTEX_UNLOCK(&di->lock);
-		return;
-	}
-	MUTEX_UNLOCK(&di->lock);
-
-	/* Common setup */
-	/* "input" must be set to something even if "in_len" is zero.
-	 *  Otherwise the size (0) isn't sent and the server will reject the
-	 * RPC message.
-	 */
-	client_arg.input = &dummy;
-
-	/* Clear battery cutoff level callback */
-	client_arg.event =
-		OEM_RAPI_CLIENT_EVENT_CUTOFF_LEVEL_CB_UNREGISTER_SET;
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc)
-		dev_err(di->dev, "Failed unregister cutoff level. Error %d\n",
-			rc);
-
-	/* Clear battery data change callback */
-	client_arg.event =
-		OEM_RAPI_CLIENT_EVENT_NOTIFY_BDATA_CB_UNREGISTER_SET;
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc)
-		dev_err(di->dev, "Failed unregister bdata change. Error %d\n",
-			rc);
 }
 
 static inline int get_technology(enum battery_technology tech)
@@ -500,6 +508,168 @@ static inline int get_technology(enum battery_technology tech)
 	return ps_tech;
 }
 
+static enum battery_technology get_battery_type(int resistance)
+{
+	struct power_supply *ps = power_supply_get_by_name(SEMC_BDATA_NAME);
+	struct data_info *di = container_of(ps, struct data_info, bdata_ps);
+
+	if (resistance >= LOW_NTC_RESISTANCE &&
+		resistance <= HIGH_NTC_RESISTANCE) {
+		if (resistance <= HIGHEST_RESISTANCE_TYPE1) {
+			dev_dbg(di->dev, "Identified battery TYPE1 R %u\n",
+				resistance);
+			return BATTERY_TECHNOLOGY_TYPE1;
+		} else {
+			dev_dbg(di->dev, "Identified battery TYPE2 R %u\n",
+				resistance);
+			return BATTERY_TECHNOLOGY_TYPE2;
+		}
+	} else {
+		dev_dbg(di->dev, "Identified battery ALIEN R %u\n",
+			resistance);
+		return BATTERY_TECHNOLOGY_UNKNOWN;
+	}
+}
+
+static int get_battery_temperature(int resistance)
+{
+	struct power_supply *ps = power_supply_get_by_name(SEMC_BDATA_NAME);
+	struct data_info *di = container_of(ps, struct data_info, bdata_ps);
+	int i;
+	int temp;
+	enum battery_technology type;
+	int num_table_elements;
+	const struct resistance_vs_temperature_semc *table_p;
+
+	type = get_battery_type(resistance);
+
+	if (type == BATTERY_TECHNOLOGY_TYPE1) {
+		table_p = &fallback_resistance_vs_temperature_type1[0];
+		num_table_elements =
+			sizeof(fallback_resistance_vs_temperature_type1) /
+			sizeof(struct resistance_vs_temperature_semc);
+	} else if (type == BATTERY_TECHNOLOGY_TYPE2) {
+		table_p = &fallback_resistance_vs_temperature_type2[0];
+		num_table_elements =
+			sizeof(fallback_resistance_vs_temperature_type2) /
+			sizeof(struct resistance_vs_temperature_semc);
+	} else {
+		temp = DEFAULT_TEMPERATURE_UNKNOWN_BATT_TYPE;
+		return temp;
+	}
+
+	for (i = 0; i < num_table_elements; i++) {
+		if (resistance < table_p[i].resistance)
+			break;
+	}
+
+	if ((i > 0) && (i < num_table_elements)) {
+		temp = INTERPOLATE(resistance,
+					table_p[i].resistance,
+					table_p[i].temperature,
+					table_p[i-1].resistance,
+					table_p[i-1].temperature);
+	} else if (i == 0) {
+		temp = table_p[0].temperature;
+	} else {
+		temp = table_p[num_table_elements - 1].temperature;
+	}
+	dev_dbg(di->dev, "%s() resist=%d type=%d temp=%d\n",
+		__func__, resistance, type, temp);
+	return temp;
+}
+
+static int get_battery_temperature_ambient(int *ambient_temp)
+{
+	int xo_therm;
+	int rc = semc_battery_read_adc(CHANNEL_ADC_XOTHERM, NULL, &xo_therm);
+
+	if (rc < 0)
+		return rc;
+
+	*ambient_temp = xo_therm / AMBIENT_TEMP_DIVIDER;
+	return 0;
+}
+
+void semc_battery_timer_start(struct data_info *di)
+{
+	int timer;
+
+	if (di->charge_status == POWER_SUPPLY_STATUS_CHARGING ||
+	!atomic_read(&di->got_bdata))
+		timer = POLLING_CHARGING_TIMER;
+	else
+		timer = POLLING_NOCHARGE_TIMER;
+
+	dev_dbg(di->dev, "%s() tim=%d\n", __func__, timer);
+
+	hrtimer_start(&di->timer, ktime_set(timer, 0), HRTIMER_MODE_REL);
+}
+
+void semc_battery_timer_stop(struct data_info *di)
+{
+	dev_dbg(di->dev, "%s()\n", __func__);
+
+	hrtimer_cancel(&di->timer);
+}
+
+static enum hrtimer_restart semc_battery_timer_func(struct hrtimer *timer)
+{
+	struct data_info *di = container_of(timer, struct data_info, timer);
+
+	queue_work(di->wq, &di->timer_work);
+	return HRTIMER_NORESTART;
+}
+
+static void semc_battery_timer_worker(struct work_struct *work)
+{
+	int resistance;
+	int ambient_temp;
+	enum battery_technology tech;
+	int tech_old = 0;
+	int temp_old = 0;
+	int amb_old = 0;
+	u8 got = 0;
+	struct data_info *di =
+		container_of(work, struct data_info, timer_work);
+
+	if (atomic_cmpxchg(&di->suspend_lock, 0, 1))
+		return;
+
+	if (get_batt_therm_resistance(di, &resistance) >= 0) {
+		tech = get_battery_type(resistance);
+		MUTEX_LOCK(&di->lock);
+		tech_old = di->technology;
+		temp_old = di->temp_celsius;
+		di->technology = get_technology(tech);
+		di->temp_celsius = get_battery_temperature(resistance);
+		MUTEX_UNLOCK(&di->lock);
+		got |= 0x01;
+	}
+	if (get_battery_temperature_ambient(&ambient_temp) >= 0) {
+		MUTEX_LOCK(&di->lock);
+		amb_old = di->temp_celsius_amb;
+		di->temp_celsius_amb = ambient_temp;
+		MUTEX_UNLOCK(&di->lock);
+		got |= 0x02;
+	}
+	atomic_set(&di->suspend_lock, 0);
+
+	if (((got & 0x01) &&
+	(di->technology != tech_old || di->temp_celsius != temp_old)) ||
+	((got & 0x02) && di->temp_celsius_amb != amb_old))
+		power_supply_changed(&di->bdata_ps);
+
+	if (got & 0x03)
+		atomic_set(&di->got_bdata, 1);
+
+	dev_dbg(di->dev, "%s() got=%d tech=%d batt_temp=%d ambient_temp=%d\n",
+		__func__,
+		got, di->technology, di->temp_celsius, di->temp_celsius_amb);
+
+	semc_battery_timer_start(di);
+}
+
 static int bdata_get_property(struct power_supply *psy,
 			      enum power_supply_property psp,
 			      union power_supply_propval *val)
@@ -507,176 +677,55 @@ static int bdata_get_property(struct power_supply *psy,
 	int rc = 0;
 	struct data_info *di = container_of(psy, struct data_info, bdata_ps);
 
+	dev_dbg(di->dev, "%s() enter. psp=%d\n", __func__, psp);
+
+	if (!atomic_read(&di->got_bdata))
+		return -EBUSY;
+
 	MUTEX_LOCK(&di->lock);
 
 	switch (psp) {
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-	case POWER_SUPPLY_PROP_HEALTH:
-		val->intval = di->health;
-		break;
-#endif
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
-	{
-		enum battery_technology tech = di->bdata.technology;
 #ifdef DEBUG_FS
-		if (di->technology_debug.active)
+		if (di->technology_debug.active) {
+			enum battery_technology tech;
 			tech = (enum battery_technology)
 				di->technology_debug.value;
-#endif
-		val->intval = get_technology(tech);
+			di->technology = get_technology(tech);
+		}
+#endif /* DEBUG_FS */
+		val->intval = di->technology;
 		break;
-	}
-	case POWER_SUPPLY_PROP_CAPACITY:
-		if (di->use_fuelgauge)
-			val->intval = di->bdata.cap_percent;
-		else
-			rc = -EINVAL;
-		break;
+
 	case POWER_SUPPLY_PROP_TEMP:
 		/* Temperature in tenths of degree Celsius */
-		val->intval = di->bdata.temp_celsius * 10;
+		val->intval = di->temp_celsius * 10;
 #ifdef DEBUG_FS
 		if (di->temperature_debug.active)
 			val->intval = di->temperature_debug.value * 10;
-#endif
+#endif /* DEBUG_FS */
 		break;
+
 	case POWER_SUPPLY_PROP_TEMP_AMBIENT:
 		/* Ambient temperature in tenths of degree Celsius */
-		val->intval = di->bdata.temp_celsius_amb * 10;
+		val->intval = di->temp_celsius_amb * 10;
 #ifdef DEBUG_FS
 		if (di->temperature_amb_debug.active)
 			val->intval = di->temperature_amb_debug.value * 10;
-#endif
+#endif /* DEBUG_FS */
 		break;
+
 	default:
 		rc = -EINVAL;
 		break;
 
 	}
-
 	MUTEX_UNLOCK(&di->lock);
+
+	dev_dbg(di->dev, "%s() exit. psp=%d val=%d rc=%d\n",
+		__func__, psp, val->intval, rc);
 
 	return rc;
-}
-
-#ifdef DEBUG_FS
-static int msm_get_event(struct data_info *di, u32 event, u8 event_switch,
-			 u32 *value)
-{
-	int rc = 0;
-	struct oem_rapi_client_streaming_func_arg client_arg = {0};
-	struct oem_rapi_client_streaming_func_ret client_ret = {0};
-
-	MUTEX_LOCK(&di->lock);
-	if (!di->rpc_client) {
-		MUTEX_UNLOCK(&di->lock);
-		return -ESRCH;
-	}
-	MUTEX_UNLOCK(&di->lock);
-
-	client_arg.event = event;
-	client_arg.in_len = sizeof(event_switch);
-	client_arg.input = (char *)&event_switch;
-	client_arg.out_len_valid = 1;
-	client_arg.output_valid = 1;
-	client_arg.output_size = sizeof(*value);
-
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc < 0) {
-		dev_err(di->dev, "Failed getting event '%d'. Error %d\n",
-			event, rc);
-	} else if (client_ret.out_len == NULL || client_ret.output == NULL ||
-		   *client_ret.out_len == 0 ||
-		   *client_ret.out_len > client_arg.output_size) {
-		rc = -ENOMSG;
-	} else {
-		if (*client_ret.out_len == sizeof(u16))
-			*value = *(u16 *)client_ret.output;
-		else
-			*value = *(u32 *)client_ret.output;
-	}
-
-	kfree(client_ret.out_len);
-	kfree(client_ret.output);
-
-	return rc;
-}
-#endif /* DEBUG_FS */
-
-static int msm_set_ovp(struct data_info *di)
-{
-	int rc;
-	struct oem_rapi_client_streaming_func_arg client_arg = {0};
-	struct oem_rapi_client_streaming_func_ret client_ret = {0};
-	u8 fet_switch_onoff = !di->battery_ovp; /* OVP 'on' -> FET 'off' and
-						 * vice versa */
-
-	MUTEX_LOCK(&di->lock);
-	if (!di->rpc_client) {
-		MUTEX_UNLOCK(&di->lock);
-		return -ESRCH;
-	}
-	MUTEX_UNLOCK(&di->lock);
-
-	client_arg.event = OEM_RAPI_CLIENT_EVENT_PM_BATT_FET_SWITCH_SET;
-	client_arg.in_len = sizeof(fet_switch_onoff);
-	client_arg.input = (char *)&fet_switch_onoff;
-	client_arg.out_len_valid = 1;
-	client_arg.output_valid = 1;
-	client_arg.output_size = sizeof(u8);
-
-	client_ret.out_len = NULL;
-	client_ret.output = NULL;
-
-	dev_info(di->dev, "Setting OVP. Batt-FET %s\n",
-		 fet_switch_onoff ? "on" : "off");
-
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc < 0) {
-		dev_err(di->dev, "Failed setting OVP switch. Error %d\n", rc);
-	} else if (client_ret.out_len == NULL ||
-		   client_ret.output == NULL ||
-		   *client_ret.out_len != client_arg.output_size) {
-		return -ENOMSG;
-	} else if (*(u8 *)client_ret.output) {
-		rc = -ENOEXEC;
-	}
-
-	kfree(client_ret.out_len);
-	kfree(client_ret.output);
-
-	return rc;
-}
-
-static void msm_platform_notify(struct data_info *di)
-{
-	struct oem_rapi_client_streaming_func_arg client_arg = {0};
-	struct oem_rapi_client_streaming_func_ret client_ret = {0};
-	int rc;
-
-	MUTEX_LOCK(&di->lock);
-	if (!di->rpc_client) {
-		MUTEX_UNLOCK(&di->lock);
-		return;
-	}
-	MUTEX_UNLOCK(&di->lock);
-
-	dev_dbg(di->dev, "%s\n", __func__);
-
-	client_arg.event =
-		OEM_RAPI_CLIENT_EVENT_NOTIFY_PLATFORM_SET;
-	client_arg.in_len = sizeof(di->notify);
-	client_arg.input = (char *)&di->notify;
-
-	rc = oem_rapi_client_streaming_function(di->rpc_client,
-						&client_arg,
-						&client_ret);
-	if (rc)
-		dev_err(di->dev, "Failed notify platform. Error %d\n", rc);
 }
 
 static int get_ext_supplier_data(struct device *dev, void *data)
@@ -688,36 +737,17 @@ static int get_ext_supplier_data(struct device *dev, void *data)
 	unsigned int i;
 
 	for (i = 0; i < ext->num_supplicants; i++) {
-		if (strcmp(ext->supplied_to[i], psy->name))
+		if (strncmp(ext->supplied_to[i], psy->name,
+			sizeof(ext->supplied_to[i])))
 			continue;
 
 		if (!ext->get_property(ext, POWER_SUPPLY_PROP_STATUS, &ret)) {
-			struct notify_platform old_notify = di->notify;
-
-			dev_dbg(di->dev, "got status %d\n", ret.intval);
-
-			di->notify.charging =
-				(POWER_SUPPLY_STATUS_CHARGING == ret.intval);
-			di->notify.battery_full =
-				(POWER_SUPPLY_STATUS_FULL == ret.intval);
-			if (memcmp(&old_notify, &di->notify,
-				   sizeof(di->notify)))
-				di->notify_changed = 1;
-		}
-
-		if (!ext->get_property(ext, POWER_SUPPLY_PROP_HEALTH, &ret)) {
-			u8 old_ovp = di->battery_ovp;
-
-			dev_dbg(di->dev, "got health %d\n", ret.intval);
-
-			di->battery_ovp =
-				(POWER_SUPPLY_HEALTH_OVERVOLTAGE == ret.intval);
-
-			if (old_ovp != di->battery_ovp)
-				di->ovp_changed = 1;
+			MUTEX_LOCK(&di->lock);
+			di->charge_status = ret.intval;
+			MUTEX_UNLOCK(&di->lock);
+			dev_dbg(dev, "got status %d\n", ret.intval);
 		}
 	}
-
 	return 0;
 }
 
@@ -726,20 +756,8 @@ static void bdata_external_power_changed_work(struct work_struct *work)
 	struct data_info *di = container_of(work, struct data_info,
 					    external_change_work);
 
-	MUTEX_LOCK(&di->lock);
-
-	di->notify_changed = 0;
-	di->ovp_changed = 0;
-
 	class_for_each_device(power_supply_class, NULL, &di->bdata_ps,
 			      get_ext_supplier_data);
-
-	MUTEX_UNLOCK(&di->lock);
-
-	if (di->notify_changed)
-		msm_platform_notify(di);
-	if (di->ovp_changed)
-		msm_set_ovp(di);
 }
 
 static void bdata_external_power_changed(struct power_supply *ps)
@@ -749,59 +767,52 @@ static void bdata_external_power_changed(struct power_supply *ps)
 	schedule_work(&di->external_change_work);
 }
 
-static void bdata_oem_rapi_client_start_work(struct work_struct *work)
-{
-	struct delayed_work *dwork = container_of(work, struct delayed_work,
-						  work);
-	struct data_info *di = container_of(dwork, struct data_info,
-					    oem_rapi_client_start_work);
-
-	if (!di->rpc_client) {
-		MUTEX_LOCK(&di->lock);
-		di->rpc_client = oem_rapi_client_init();
-		if (!di->rpc_client || IS_ERR(di->rpc_client)) {
-			dev_err(di->dev, "Failed initialize oem rapi client\n");
-			di->rpc_client = NULL;
-			MUTEX_UNLOCK(&di->lock);
-			schedule_delayed_work(&di->oem_rapi_client_start_work,
-					      OEM_RAPI_RECONNECT_S * HZ);
-			return;
-		}
-		MUTEX_UNLOCK(&di->lock);
-
-		set_platform_callbacks(di);
-	}
-}
-
 static int bdata_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct data_info *di = platform_get_drvdata(dev);
+	struct power_supply *psy = power_supply_get_by_name(SEMC_BDATA_NAME);
+	struct data_info *di;
 
-	dev_dbg(di->dev, "%s\n", __func__);
+	dev_dbg(&dev->dev, "%s\n", __func__);
+
+	if (!psy) {
+		dev_err(&dev->dev, "No data\n");
+		return 0;
+	}
+	di = container_of(psy, struct data_info, bdata_ps);
+
+	semc_battery_timer_stop(di);
 
 	if (work_pending(&di->external_change_work))
 		flush_work(&di->external_change_work);
 
-	if (delayed_work_pending(&di->oem_rapi_client_start_work))
-		cancel_delayed_work(&di->oem_rapi_client_start_work);
+	if (atomic_cmpxchg(&di->suspend_lock, 0, 1))
+		return -EAGAIN;
 
 	return 0;
 }
 
 static int bdata_resume(struct platform_device *dev)
 {
-	struct data_info *di = platform_get_drvdata(dev);
+	struct power_supply *psy = power_supply_get_by_name(SEMC_BDATA_NAME);
+	struct data_info *di;
 
-	dev_dbg(di->dev, "%s\n", __func__);
+	dev_dbg(&dev->dev, "%s\n", __func__);
 
-	if (!di->rpc_client)
-		schedule_delayed_work(&di->oem_rapi_client_start_work, 0);
+	if (!psy) {
+		dev_err(&dev->dev, "No data\n");
+		return 0;
+	}
+	di = container_of(psy, struct data_info, bdata_ps);
 
+	atomic_set(&di->suspend_lock, 0);
+
+	queue_work(di->wq, &di->timer_work);
 	return 0;
 }
 
 static int bdata_probe(struct platform_device *pdev)
 {
+	int rc = 0;
 	struct semc_battery_platform_data *pdata;
 	struct data_info *di;
 
@@ -810,7 +821,8 @@ static int bdata_probe(struct platform_device *pdev)
 	di = kzalloc(sizeof(struct data_info), GFP_KERNEL);
 	if (!di) {
 		dev_err(&pdev->dev, "Memory alloc fail\n");
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto probe_exit;
 	}
 
 	di->dev = &pdev->dev;
@@ -822,70 +834,71 @@ static int bdata_probe(struct platform_device *pdev)
 	di->bdata_ps.external_power_changed =
 		bdata_external_power_changed;
 
-	di->bdata.technology = BATTERY_TECHNOLOGY_UNKNOWN;
-	di->bdata.cap_percent = 50;
-	di->bdata.temp_celsius = 25;
-	di->bdata.temp_celsius_amb = 25;
-#ifdef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-	di->health = POWER_SUPPLY_HEALTH_GOOD;
-#endif
+	di->technology = BATTERY_TECHNOLOGY_UNKNOWN;
+	di->temp_celsius = 25;
+	di->temp_celsius_amb = 25;
 
 	pdata = (struct semc_battery_platform_data *)pdev->dev.platform_data;
 	if (pdata) {
-#ifndef CONFIG_SEMC_BATTERY_SHOW_HEALTH
-		di->set_battery_health = pdata->set_battery_health;
-#endif
-		di->use_fuelgauge = pdata->use_fuelgauge;
-
-		if (di->use_fuelgauge) {
-			di->bdata_ps.properties = batt_props_with_fg;
-			di->bdata_ps.num_properties =
-				ARRAY_SIZE(batt_props_with_fg);
-		}
-
 		if (pdata->supplied_to) {
 			di->bdata_ps.supplied_to = pdata->supplied_to;
 			di->bdata_ps.num_supplicants =
 				pdata->num_supplicants;
 		}
+		di->pdata = pdata;
 	}
 
 	mutex_init(&di->lock);
 
-	INIT_WORK(&di->external_change_work,
-		  bdata_external_power_changed_work);
-	INIT_DELAYED_WORK(&di->oem_rapi_client_start_work,
-			  bdata_oem_rapi_client_start_work);
+	hrtimer_init(&di->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	di->timer.function = semc_battery_timer_func;
 
-	if (power_supply_register(&pdev->dev, &di->bdata_ps)) {
-		dev_err(di->dev, "Failed to register power supply\n");
-		kfree(di);
-		return -EPERM;
+	di->wq = create_singlethread_workqueue("semc_battery_work");
+	if (!di->wq) {
+		dev_err(&pdev->dev, "Failed creating workqueue\n");
+		rc = -EIO;
+		goto probe_exit_free;
 	}
 
-	platform_set_drvdata(pdev, di);
+	INIT_WORK(&di->timer_work, semc_battery_timer_worker);
+	INIT_WORK(&di->external_change_work,
+		  bdata_external_power_changed_work);
+	if (power_supply_register(&pdev->dev, &di->bdata_ps)) {
+		dev_err(&pdev->dev, "Failed to register power supply\n");
+		rc = -EPERM;
+		goto probe_exit_destroy_wq;
+	}
 
-	schedule_delayed_work(&di->oem_rapi_client_start_work, 0);
+	semc_battery_timer_start(di);
 
-#ifdef DEBUG_FS
 	if (semc_battery_create_attrs(di->bdata_ps.dev))
-		dev_info(di->dev, "Debug support failed\n");
-#endif
+		dev_info(&pdev->dev, "Debug support failed\n");
 
-	return 0;
+	return rc;
+
+probe_exit_destroy_wq:
+	destroy_workqueue(di->wq);
+probe_exit_free:
+	kfree(di);
+probe_exit:
+	return rc;
 }
 
 static int __exit bdata_remove(struct platform_device *pdev)
 {
 	struct data_info *di = platform_get_drvdata(pdev);
 
-	dev_info(di->dev, "remove\n");
+	dev_info(&pdev->dev, "remove\n");
 
-	clear_platform_callbacks(di);
-	oem_rapi_client_close();
-#ifdef DEBUG_FS
+	hrtimer_cancel(&di->timer);
+
+	if (work_pending(&di->timer_work))
+		cancel_work_sync(&di->timer_work);
+
+	destroy_workqueue(di->wq);
+
 	semc_battery_remove_attrs(di->bdata_ps.dev);
-#endif
+
 	power_supply_unregister(&di->bdata_ps);
 	kfree(di);
 

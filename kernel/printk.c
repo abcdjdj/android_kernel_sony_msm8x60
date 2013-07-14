@@ -43,6 +43,7 @@
 #include <linux/rculist.h>
 #include <linux/coresight-stm.h>
 
+#include <mach/msm_rtb.h>
 #include <asm/uaccess.h>
 
 #include <mach/msm_rtb.h>
@@ -1400,8 +1401,7 @@ again:
 	 * flush, no worries.
 	 */
 	raw_spin_lock(&logbuf_lock);
-	if (con_start != log_end)
-		retry = 1;
+	retry = con_start != log_end;
 	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
 
 	if (retry && console_trylock())

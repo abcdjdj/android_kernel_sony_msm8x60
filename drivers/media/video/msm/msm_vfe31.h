@@ -1,5 +1,5 @@
-/* Copyright (c) 2010, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2010 Sony Ericsson Mobile Communications AB.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -1051,6 +1051,10 @@ struct vfe31_ctrl_type {
 	uint32_t output2Period;
 	uint32_t vfeFrameSkipCount;
 	uint32_t vfeFrameSkipPeriod;
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
+	uint32_t rolloff_update;
+#endif
+	uint32_t status_bits;
 	struct vfe_stats_control afStatsControl;
 	struct vfe_stats_control awbStatsControl;
 	struct vfe_stats_control aecStatsControl;

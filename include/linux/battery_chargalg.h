@@ -95,6 +95,13 @@ struct battery_chargalg_platform_data {
 	bool (*get_restrict_ctl)(int bvolt, u16 volt, u16 curr);
 	void (*get_restricted_setting)(u16 *volt, u16 *curr);
 	int (*setup_exchanged_power_supply)(u8 connection);
+#ifdef CONFIG_SEMC_CHARGER_CRADLE_ARCH
+	u8 (*get_ac_online_status)(void);
+	unsigned int (*get_supply_current_limit_cradle)(void);
+	int (*set_input_current_limit_dual)(u16 ma_usb, u16 ma_cradle);
+	int (*set_input_voltage_dpm_usb)(u8 usb_compliant);
+	int (*set_input_voltage_dpm_cradle)(void);
+#endif
 	unsigned int allow_dynamic_charge_current_ctrl;
 	u16 charge_set_current_1; /* mA */
 	u16 charge_set_current_2; /* mA */

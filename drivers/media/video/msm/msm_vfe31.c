@@ -1,5 +1,5 @@
-/* Copyright (c) 2009 - 2010, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2010 Sony Ericsson Mobile Communications AB.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,10 +24,7 @@
 #ifdef CONFIG_MSM_VPE
 #include "msm_vpe1.h"
 #endif
-#include <mach/camera.h>
-#include <linux/io.h>
-#include <linux/pm_qos.h>
-#include <asm/atomic.h>
+
 atomic_t irq_cnt;
 
 #define CHECKED_COPY_FROM_USER(in) {					\
@@ -504,12 +501,10 @@ static int vfe31_config_axi(int mode, struct axidata *ad, uint32_t *ao)
 	case OUTPUT_2: {
 		if (ad->bufnum2 != 3)
 			return -EINVAL;
-
-		/* set from user driver side start */
-		/* *p = 0x200;*/    /* preview with wm0 & wm1 */
-		/* set from user driver side end */
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
 		vfe31_ctrl->outpath.out0.ch0 = 0; /* luma   */
 		vfe31_ctrl->outpath.out0.ch1 = 1; /* chroma */
+#endif
 		regp1 = &(ad->region[ad->bufnum1]);
 		outp1 = &(vfe31_ctrl->outpath.out0);
 		vfe31_ctrl->outpath.output_mode |= VFE31_OUTPUT_MODE_PT;
@@ -538,15 +533,13 @@ static int vfe31_config_axi(int mode, struct axidata *ad, uint32_t *ao)
 		/* use wm0& 4 for thumbnail, wm1&5 for main image.*/
 		if ((ad->bufnum1 < 1) || (ad->bufnum2 < 1))
 			return -EINVAL;
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
 		/* at least one frame for snapshot.  */
-		/* set from user driver side start */
-		/* *p++ = 0x1; */    /* xbar cfg0 */
-		/* *p = 0x203; */    /* xbar cfg1 */
-		/* set from user driver side end */
 		vfe31_ctrl->outpath.out0.ch0 = 0; /* thumbnail luma   */
 		vfe31_ctrl->outpath.out0.ch1 = 4; /* thumbnail chroma */
 		vfe31_ctrl->outpath.out1.ch0 = 1; /* main image luma   */
 		vfe31_ctrl->outpath.out1.ch1 = 5; /* main image chroma */
+#endif
 		vfe31_ctrl->outpath.output_mode |=
 			VFE31_OUTPUT_MODE_S;  /* main image.*/
 		vfe31_ctrl->outpath.output_mode |=
@@ -608,14 +601,177 @@ static int vfe31_config_axi(int mode, struct axidata *ad, uint32_t *ao)
 		}
 		break;
 
+	case OUTPUT_1_2_AND_3:
+		CDBG("%s: OUTPUT_1_2_AND_3", __func__);
+		CDBG("%s: %d %d %d", __func__, ad->bufnum1, ad->bufnum2,
+			ad->bufnum3);
+		/* use wm0& 4 for postview, wm1&5 for preview.*/
+		/* use wm2& 6 for main img */
+		if ((ad->bufnum1 < 1) || (ad->bufnum2 < 1) || (ad->bufnum3 < 1))
+			return -EINVAL;
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
+		/* at least one frame for snapshot.  */
+		vfe31_ctrl->outpath.out0.ch0 = 0; /* preview luma   */
+		vfe31_ctrl->outpath.out0.ch1 = 4; /* preview chroma */
+		vfe31_ctrl->outpath.out1.ch0 = 1; /* thumbnail luma   */
+		vfe31_ctrl->outpath.out1.ch1 = 5; /* thumbnail chroma */
+		vfe31_ctrl->outpath.out2.ch0 = 2; /* main image luma   */
+		vfe31_ctrl->outpath.out2.ch1 = 6; /* main image chroma */
+#endif
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_S;  /* main image.*/
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_P;  /* preview. */
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_T;  /* thumbnail. */
+
+		/* this is preview buffer. */
+		regp1 = &(ad->region[0]);
+		/* this is thumbnail buffer. */
+		regp2 = &(ad->region[ad->bufnum1]);
+		/* this is main image buffer. */
+		regp3 = &(ad->region[ad->bufnum1+ad->bufnum2]);
+		outp1 = &(vfe31_ctrl->outpath.out0);
+		outp2 = &(vfe31_ctrl->outpath.out1);
+		outp3 = &(vfe31_ctrl->outpath.out2);
+
+		/*  Parse the buffers!!! */
+		/* first fill ping & pong */
+		for (i = 0; i < 2; i++) {
+			p1 = ao + 6 + i;    /* wm0 for y  */
+			*p1 = (regp1->paddr + regp1->info.planar0_off);
+			p1 = ao + 30 + i;  /* wm4 for cbcr */
+			*p1 = (regp1->paddr + regp1->info.planar1_off);
+			regp1++;
+		}
+
+		for (i = 0; i < 2; i++) {
+			p2 = ao + 12 + i;    /* wm1 for y  */
+			*p2 = (regp2->paddr + regp2->info.planar0_off);
+			p2 = ao + 36 + i;  /* wm5 for cbcr */
+			*p2 = (regp2->paddr + regp2->info.planar1_off);
+			regp2++;
+		}
+
+		for (i = 0; i < 2; i++) {
+			p3 = ao + 18 + i;    /* wm2 for y  */
+			*p3 = (regp3->paddr + regp3->info.planar0_off);
+			p3 = ao + 42 + i;  /* wm6 for cbcr */
+			*p3 = (regp3->paddr + regp3->info.planar1_off);
+			regp3++;
+		}
+
+		for (i = 2; i < ad->bufnum1; i++) {
+			ret = vfe31_add_free_buf(outp1, regp1);
+			if (ret < 0)
+				return ret;
+			regp1++;
+		}
+
+		for (i = 2; i < ad->bufnum2; i++) {
+			ret = vfe31_add_free_buf(outp2, regp2);
+			if (ret < 0)
+				return ret;
+			regp2++;
+		}
+
+		for (i = 2; i < ad->bufnum3; i++) {
+			ret = vfe31_add_free_buf(outp3, regp3);
+			if (ret < 0)
+				return ret;
+			regp3++;
+		}
+		break;
+
+	case OUTPUT_ZSL_ALL_CHNLS:
+		CDBG("%s: OUTPUT_ZSL_ALL_CHNLS", __func__);
+		CDBG("%s: %d %d %d", __func__, ad->bufnum1, ad->bufnum2,
+			ad->bufnum3);
+		/* use wm0& 4 for postview, wm1&5 for preview.*/
+		/* use wm2& 6 for main img */
+		if ((ad->bufnum1 < 1) || (ad->bufnum2 < 1) || (ad->bufnum3 < 1))
+			return -EINVAL;
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_S;  /* main image.*/
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_P_ALL_CHNLS;  /* preview. */
+		vfe31_ctrl->outpath.output_mode |=
+			VFE31_OUTPUT_MODE_T;  /* thumbnail. */
+
+		/* this is preview buffer. */
+		regp1 = &(ad->region[0]);
+		/* this is thumbnail buffer. */
+		regp2 = &(ad->region[ad->bufnum1]);
+		/* this is main image buffer. */
+		regp3 = &(ad->region[ad->bufnum1+ad->bufnum2]);
+		outp1 = &(vfe31_ctrl->outpath.out0);
+		outp2 = &(vfe31_ctrl->outpath.out1);
+		outp3 = &(vfe31_ctrl->outpath.out2);
+
+		/*  Parse the buffers!!! */
+		/* first fill ping & pong */
+		for (i = 0; i < 2; i++) {
+			p1 = ao + 6 + i;    /* wm0 for y  */
+			*p1 = (regp2->paddr + regp2->info.planar0_off);
+			p1 = ao + 12 + i;  /* wm1 for cbcr */
+			*p1 = (regp2->paddr + regp2->info.planar1_off);
+			regp2++;
+		}
+
+		for (i = 0; i < 2; i++) {
+			p2 = ao + 30 + i;    /* wm4 for y  */
+			*p2 = (regp1->paddr + regp1->info.planar0_off);
+			p2 = ao + 36 + i;  /* wm5 for cbcr */
+			*p2 = (regp1->paddr + regp1->info.planar1_off);
+			p2 = ao + 42 + i;  /* wm5 for cbcr */
+			*p2 = (regp1->paddr + regp1->info.planar2_off);
+			regp1++;
+		}
+
+		for (i = 0; i < 2; i++) {
+			p3 = ao + 18 + i;    /* wm2 for y  */
+			*p3 = (regp3->paddr + regp3->info.planar0_off);
+			p3 = ao + 24 + i;  /* wm3 for cbcr */
+			*p3 = (regp3->paddr + regp3->info.planar1_off);
+			regp3++;
+		}
+		for (i = 2; i < ad->bufnum1; i++) {
+			ret = vfe31_add_free_buf(outp1, regp1);
+			if (ret < 0)
+				return ret;
+			regp1++;
+		}
+
+		for (i = 2; i < ad->bufnum2; i++) {
+			ret = vfe31_add_free_buf(outp2, regp2);
+			if (ret < 0)
+				return ret;
+			regp2++;
+		}
+
+		for (i = 2; i < ad->bufnum3; i++) {
+			ret = vfe31_add_free_buf(outp3, regp3);
+			if (ret < 0)
+				return ret;
+			regp3++;
+		}
+		break;
+
 	case OUTPUT_1_AND_3: {
 		/* use wm0& 4 for preview, wm1&5 for video.*/
 		if ((ad->bufnum1 < 2) || (ad->bufnum2 < 2))
 			return -EINVAL;
+
+#ifdef CONFIG_MSM_CAMERA_V4L2
+		*p++ = 0x1;    /* xbar cfg0 */
+		*p = 0x1a03;    /* xbar cfg1 */
+#endif
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
 		vfe31_ctrl->outpath.out0.ch0 = 0; /* preview luma   */
 		vfe31_ctrl->outpath.out0.ch1 = 4; /* preview chroma */
 		vfe31_ctrl->outpath.out2.ch0 = 1; /* video luma     */
 		vfe31_ctrl->outpath.out2.ch1 = 5; /* video chroma   */
+#endif
 		vfe31_ctrl->outpath.output_mode |=
 			VFE31_OUTPUT_MODE_V;  /* video*/
 		vfe31_ctrl->outpath.output_mode |=
@@ -751,6 +907,10 @@ static void vfe31_reset_internal_variables(void)
 	vfe31_ctrl->output2Period  = 31;
 	vfe31_ctrl->vfeFrameSkipCount   = 0;
 	vfe31_ctrl->vfeFrameSkipPeriod  = 31;
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
+	vfe31_ctrl->rolloff_update = false;
+#endif
+
 	/* Stats control variables. */
 	memset(&(vfe31_ctrl->afStatsControl), 0,
 		sizeof(struct vfe_stats_control));
@@ -813,6 +973,11 @@ static int vfe31_operation_config(uint32_t *cmd)
 	uint32_t *p = cmd;
 
 	vfe31_ctrl->operation_mode = *p;
+#ifdef CONFIG_MSM_VPE
+	vpe_ctrl->pad_2k_bool = (vfe31_ctrl->operation_mode & 1) ?
+		FALSE : TRUE;
+#endif
+
 	vfe31_ctrl->stats_comp = *(++p);
 
 	msm_io_w(*(++p), vfe31_ctrl->vfebase + VFE_CFG_OFF);
@@ -1502,6 +1667,9 @@ static int vfe31_proc_general(struct msm_vfe31_cmd *cmd)
 		msm_io_memcpy(vfe31_ctrl->vfebase + vfe31_cmd[cmd->id].offset,
 		cmdp_local, 16);
 		cmdp_local += 4;
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
+		vfe31_ctrl->rolloff_update = true;
+#endif
 		vfe31_program_dmi_cfg(ROLLOFF_RAM);
 		/* for loop for extrcting init table. */
 		for (i = 0 ; i < (VFE31_ROLL_OFF_INIT_TABLE_SIZE * 2) ; i++) {
@@ -2107,7 +2275,7 @@ static void vfe31_process_reg_update_irq(void)
 				break;
 			}
 		}
-		vfe31_ctrl->req_start_video_rec =  FALSE;
+		vfe31_ctrl->recording_state = VFE_REC_STATE_STARTED;
 #ifdef CONFIG_MSM_VPE
 		if (vpe_ctrl->dis_en) {
 			old_val = msm_io_r(
@@ -2118,7 +2286,9 @@ static void vfe31_process_reg_update_irq(void)
 		}
 #endif
 		CDBG("start video triggered .\n");
-	} else if (vfe31_ctrl->req_stop_video_rec) {
+#endif
+	} else if (vfe31_ctrl->recording_state
+			== VFE_REC_STATE_STOP_REQUESTED) {
 		if (vfe31_ctrl->outpath.output_mode & VFE31_OUTPUT_MODE_V) {
 			msm_io_w(0, vfe31_ctrl->vfebase + V31_AXI_OUT_OFF + 20 +
 				24 * (vfe31_ctrl->outpath.out2.ch0));
@@ -2799,11 +2969,16 @@ static void vfe31_process_stats_rs_irq(void){
 		vfe31_ctrl->rsStatsControl.droppedStatsFrameCount++;
 }
 
-static void vfe31_process_stats_cs_irq(void){
-	if (!(vfe31_ctrl->csStatsControl.ackPending)) {
-		vfe31_ctrl->csStatsControl.bufToRender =
-			vfe31_process_stats_irq_common(statsCsNum,
-			vfe31_ctrl->csStatsControl.nextFrameAddrBuf);
+static void vfe31_process_stats_irq(uint32_t *irqstatus)
+{
+#if !defined(CONFIG_SEMC_CAM_MAIN) && !defined(CONFIG_SEMC_CAM_SUB)
+	/* Subsample the stats according to the hfr speed*/
+	if ((vfe31_ctrl->hfr_mode != HFR_MODE_OFF) &&
+		(vfe31_ctrl->vfeFrameId % vfe31_ctrl->hfr_mode != 0)) {
+		CDBG("Skip the stats when HFR enabled\n");
+		return;
+	}
+#endif
 
 		vfe_send_stats_msg(vfe31_ctrl->csStatsControl.bufToRender,
 						statsCsNum);
@@ -2905,8 +3080,20 @@ static void vfe31_do_tasklet(unsigned long data)
 				if (qcmd->vfeInterruptStatus0 &
 					VFE_IRQ_STATUS0_STATS_COMPOSIT_MASK) {
 					CDBG("Stats composite irq occured.\n");
-					vfe31_process_stats_comb_irq(
+#if defined(CONFIG_SEMC_CAM_MAIN) || defined(CONFIG_SEMC_CAM_SUB)
+					if ((vfe31_ctrl->hfr_mode !=
+						HFR_MODE_OFF) &&
+						(vfe31_ctrl->vfeFrameId %
+						vfe31_ctrl->hfr_mode != 0)) {
+						CDBG("Skip HFR enabled\n");
+					} else {
+						vfe31_process_stats_irq(
 						&qcmd->vfeInterruptStatus0);
+					}
+#else
+					vfe31_process_stats_irq(
+						&qcmd->vfeInterruptStatus0);
+#endif
 				}
 			} else {
 				/* process individual stats interrupt. */
@@ -3025,6 +3212,37 @@ static irqreturn_t vfe31_parse_irq(int irq_num, void *data)
 	return IRQ_HANDLED;
 }
 
+static void vfe31_release(struct platform_device *pdev)
+{
+	struct resource	*vfemem, *vfeio;
+
+	vfe31_reset_free_buf_queue_all();
+	CDBG("%s, free_irq\n", __func__);
+	free_irq(vfe31_ctrl->vfeirq, 0);
+	tasklet_kill(&vfe31_tasklet);
+
+	if (atomic_read(&irq_cnt))
+		pr_warning("%s, Warning IRQ Count not ZERO\n", __func__);
+
+	vfemem = vfe31_ctrl->vfemem;
+	vfeio  = vfe31_ctrl->vfeio;
+
+#ifdef CONFIG_MSM_VPE
+	msm_vpe_release();
+#endif
+
+	kfree(vfe31_ctrl->extdata);
+	iounmap(vfe31_ctrl->vfebase);
+	kfree(vfe31_ctrl);
+	vfe31_ctrl = NULL;
+	release_mem_region(vfemem->start, (vfemem->end - vfemem->start) + 1);
+	CDBG("%s, msm_camio_disable\n", __func__);
+	msm_camio_disable(pdev);
+	msm_camio_set_perf_lvl(S_EXIT);
+
+	vfe_syncdata = NULL;
+}
+
 static int vfe31_resource_init(struct msm_vfe_callback *presp,
 	struct platform_device *pdev, void *sdata)
 {
@@ -3130,10 +3348,16 @@ static int vfe31_init(struct msm_vfe_callback *presp,
 		return rc;
 	/* Bring up all the required GPIOs and Clocks */
 	rc = msm_camio_enable(pdev);
+	msm_camio_set_perf_lvl(S_INIT);
 #ifdef CONFIG_MSM_VPE
 	if (msm_vpe_open() < 0)
 		CDBG("%s: vpe_open failed\n", __func__);
 #endif
+
+	/* TO DO: Need to release the VFE resources */
+	rc = request_irq(vfe31_ctrl->vfeirq, vfe31_parse_irq,
+			IRQF_TRIGGER_RISING, "vfe", 0);
+
 	return rc;
 }
 
@@ -3149,13 +3373,7 @@ void msm_camvfe_fn_init(struct msm_camvfe_fn *fptr, void *data)
 
 void msm_camvpe_fn_init(struct msm_camvpe_fn *fptr, void *data)
 {
-#ifdef CONFIG_MSM_VPE_STANDALONE
-	fptr->vpe_reg		= NULL;
-	fptr->send_frame_to_vpe	= NULL;
-	fptr->vpe_config	= NULL;
-	fptr->vpe_cfg_update	= NULL;
-	fptr->dis		= NULL;
-#else
+#ifdef CONFIG_MSM_VPE
 	fptr->vpe_reg		= msm_vpe_reg;
 	fptr->send_frame_to_vpe	= msm_send_frame_to_vpe;
 	fptr->vpe_config	= msm_vpe_config;
@@ -3164,6 +3382,13 @@ void msm_camvpe_fn_init(struct msm_camvpe_fn *fptr, void *data)
 #endif
 #ifdef CONFIG_MSM_VPE
 	vpe_ctrl->syncdata = data;
+#else
+	fptr->vpe_reg		= NULL;
+	fptr->send_frame_to_vpe	= NULL;
+	fptr->vpe_config	= NULL;
+	fptr->vpe_cfg_update	= NULL;
+	fptr->dis		= NULL;
+	fptr->vpe_cfg_offset	= NULL;
 #endif
 }
 

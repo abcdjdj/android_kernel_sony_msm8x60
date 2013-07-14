@@ -91,8 +91,11 @@ static struct clk *camio_vpe_pclk;
 static struct regulator *fs_vfe;
 static struct regulator *fs_ijpeg;
 static struct regulator *fs_vpe;
+#if !defined(CONFIG_SEMC_CAM_MAIN) && !defined(CONFIG_SEMC_CAM_SUB) && !defined(CONFIG_SONY_CAM_MAIN_V4L2) && !defined(CONFIG_SONY_CAM_SUB_V4L2)
 static struct regulator *ldo15;
 static struct regulator *lvs0;
+static struct regulator *ldo25;
+#endif
 
 static struct msm_camera_io_ext camio_ext;
 static struct msm_camera_io_clk camio_clk;
@@ -178,6 +181,7 @@ void msm_io_memcpy(void __iomem *dest_addr, void __iomem *src_addr, u32 len)
 
 static void msm_camera_vreg_enable(void)
 {
+#if !defined(CONFIG_SEMC_CAM_MAIN) && !defined(CONFIG_SEMC_CAM_SUB) && !defined(CONFIG_SONY_CAM_MAIN_V4L2) && !defined(CONFIG_SONY_CAM_SUB_V4L2)
 	ldo15 = regulator_get(NULL, "8058_l15");
 	if (IS_ERR(ldo15)) {
 		pr_err("%s: VREG LDO15 get failed\n", __func__);
@@ -204,6 +208,22 @@ static void msm_camera_vreg_enable(void)
 		goto lvs0_put;
 	}
 
+	ldo25 = regulator_get(NULL, "8058_l25");
+	if (IS_ERR(ldo25)) {
+		pr_err("%s: VREG LDO25 get failed\n", __func__);
+		ldo25 = NULL;
+		goto lvs0_disable;
+	}
+	if (regulator_set_voltage(ldo25, 1200000, 1200000)) {
+		pr_err("%s: VREG LDO25 set voltage failed\n",  __func__);
+		goto ldo25_disable;
+	}
+	if (regulator_enable(ldo25)) {
+		pr_err("%s: VREG LDO25 enable failed\n", __func__);
+		goto ldo25_put;
+	}
+#endif
+
 	fs_vfe = regulator_get(NULL, "fs_vfe");
 	if (IS_ERR(fs_vfe)) {
 		CDBG("%s: Regulator FS_VFE get failed %ld\n", __func__,
@@ -215,16 +235,25 @@ static void msm_camera_vreg_enable(void)
 	}
 	return;
 
+#if !defined(CONFIG_SEMC_CAM_MAIN) && !defined(CONFIG_SEMC_CAM_SUB) && !defined(CONFIG_SONY_CAM_MAIN_V4L2) && !defined(CONFIG_SONY_CAM_SUB_V4L2)
+ldo25_disable:
+	regulator_disable(ldo25);
+ldo25_put:
+	regulator_put(ldo25);
+lvs0_disable:
+	regulator_disable(lvs0);
 lvs0_put:
 	regulator_put(lvs0);
 ldo15_disable:
 	regulator_disable(ldo15);
 ldo15_put:
 	regulator_put(ldo15);
+#endif
 }
 
 static void msm_camera_vreg_disable(void)
 {
+#if !defined(CONFIG_SEMC_CAM_MAIN) && !defined(CONFIG_SEMC_CAM_SUB) && !defined(CONFIG_SONY_CAM_MAIN_V4L2) && !defined(CONFIG_SONY_CAM_SUB_V4L2)
 	if (ldo15) {
 		regulator_disable(ldo15);
 		regulator_put(ldo15);
@@ -235,6 +264,11 @@ static void msm_camera_vreg_disable(void)
 		regulator_put(lvs0);
 	}
 
+	if (ldo25) {
+		regulator_disable(ldo25);
+		regulator_put(ldo25);
+	}
+#endif
 	if (fs_vfe) {
 		regulator_disable(fs_vfe);
 		regulator_put(fs_vfe);
@@ -324,8 +358,10 @@ int msm_camio_clk_enable(enum msm_camio_clk_type clktype)
 		break;
 	}
 
-	if (!IS_ERR(clk))
+	if (!IS_ERR(clk)) {
+		clk_prepare(clk);
 		clk_enable(clk);
+	}
 	else
 		rc = -1;
 	return rc;

@@ -9,6 +9,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * NOTE: This file has been modified by Sony Mobile Communications AB.
+ * Modifications are licensed under the License.
  */
 #include <linux/module.h>
 #include <linux/uaccess.h>
@@ -585,6 +587,8 @@ static int z180_stop(struct kgsl_device *device)
 {
 	device->ftbl->irqctrl(device, 0);
 	z180_idle(device);
+
+	del_timer_sync(&device->idle_timer);
 
 	del_timer_sync(&device->idle_timer);
 
