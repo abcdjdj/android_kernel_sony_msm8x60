@@ -2337,9 +2337,9 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 	int rc;
 	int ret;
 	struct device *class_dev;
-	char qsee_not_legacy = 0;
-	struct msm_bus_scale_pdata *qseecom_platform_support = NULL;
-	uint32_t system_call_id = QSEOS_CHECK_VERSION_CMD;
+	//char qsee_not_legacy = 0;
+	struct msm_bus_scale_pdata *qseecom_platform_support;
+	//uint32_t system_call_id = QSEOS_CHECK_VERSION_CMD;
 
 	qsee_bw_count = 0;
 	qsee_perf_client = 0;
@@ -2382,7 +2382,7 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 	spin_lock_init(&qseecom.registered_kclient_list_lock);
 	init_waitqueue_head(&qseecom.send_resp_wq);
 	qseecom.send_resp_flag = 0;
-
+/*
 	rc = scm_call(6, 1, &system_call_id, sizeof(system_call_id),
 				&qsee_not_legacy, sizeof(qsee_not_legacy));
 	if (rc) {
@@ -2391,10 +2391,11 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 	}
 	if (qsee_not_legacy)
 		qseecom.qseos_version = QSEOS_VERSION_14;
-	else {
+	else*/ {
 		qseecom.qseos_version = QSEOS_VERSION_13;
 		pil = NULL;
 		pil_ref_cnt = 0;
+		pr_err("TZ Probe!\n");
 	}
 
 	qseecom.pdev = class_dev;

@@ -508,6 +508,35 @@ struct platform_device msm8960_device_uart_gsbi5 = {
 	.resource	= resources_uart_gsbi5,
 };
 
+#ifdef CONFIG_MSM_GSBI12_UART
+static struct resource resources_uart_gsbi12[] = {
+	{
+		.start	= GSBI12_UARTDM_IRQ,
+		.end	= GSBI12_UARTDM_IRQ,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= MSM_UART12DM_PHYS,
+		.end	= MSM_UART12DM_PHYS + PAGE_SIZE - 1,
+		.name	= "uartdm_resource",
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= MSM_GSBI12_PHYS,
+		.end	= MSM_GSBI12_PHYS + PAGE_SIZE - 1,
+		.name	= "gsbi_resource",
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm8960_device_uart_gsbi12 = {
+	.name	= "msm_serial_hsl",
+	.id	= 3,
+	.num_resources	= ARRAY_SIZE(resources_uart_gsbi12),
+	.resource	= resources_uart_gsbi12,
+};
+#endif
+
 static struct msm_serial_hslite_platform_data uart_gsbi8_pdata = {
 	.line		= 0,
 };
@@ -2179,6 +2208,7 @@ struct platform_device msm8960_device_vpe = {
 };
 #endif
 
+#if defined(CONFIG_TSIF) || defined(CONFIG_TSIF_MODULE)
 #define MSM_TSIF0_PHYS       (0x18200000)
 #define MSM_TSIF1_PHYS       (0x18201000)
 #define MSM_TSIF_SIZE        (0x200)
@@ -2283,6 +2313,7 @@ struct platform_device msm_device_tsif[2] = {
 		},
 	}
 };
+#endif
 
 static struct resource resources_ssbi_pmic[] = {
 	{
@@ -2385,6 +2416,11 @@ struct platform_device msm_cpudai0 = {
 struct platform_device msm_cpudai1 = {
 	.name	= "msm-dai-q6",
 	.id	= 0x4001,
+};
+
+struct platform_device msm_cpudai_hdmi_rx = {
+	.name	= "msm-dai-q6-hdmi",
+	.id	= 8,
 };
 
 struct platform_device msm8960_cpudai_slimbus_2_rx = {

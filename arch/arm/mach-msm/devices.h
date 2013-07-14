@@ -50,7 +50,9 @@ extern struct platform_device msm8625_device_uart1;
 extern struct platform_device msm_device_uart_dm1;
 extern struct platform_device msm_device_uart_dm2;
 extern struct platform_device msm_device_uart_dm3;
+extern struct platform_device msm_device_uart_dm7;
 extern struct platform_device msm_device_uart_dm12;
+extern struct platform_device msm_device_uart_gsbi5;
 extern struct platform_device *msm_device_uart_gsbi9;
 extern struct platform_device msm_device_uart_dm6;
 extern struct platform_device msm_device_uart_dm8;
@@ -152,6 +154,7 @@ extern struct platform_device msm_gsbi0_qup_i2c_device;
 extern struct platform_device msm_gsbi1_qup_i2c_device;
 extern struct platform_device msm_gsbi3_qup_i2c_device;
 extern struct platform_device msm_gsbi4_qup_i2c_device;
+extern struct platform_device msm_gsbi5_qup_i2c_device;
 extern struct platform_device msm_gsbi7_qup_i2c_device;
 extern struct platform_device msm_gsbi8_qup_i2c_device;
 extern struct platform_device msm_gsbi9_qup_i2c_device;
@@ -402,6 +405,14 @@ extern struct platform_device coresight_etm2_device;
 extern struct platform_device coresight_etm3_device;
 #endif
 
+extern struct platform_device msm8960_cpu_idle_device;
+
+extern struct platform_device msm8960_msm_gov_device;
+
+extern struct platform_device msm_device_csic0;
+extern struct platform_device msm_device_csic1;
+extern struct platform_device msm_device_vfe;
+extern struct platform_device msm_device_vpe;
 extern struct platform_device msm_bus_8064_apps_fabric;
 extern struct platform_device msm_bus_8064_sys_fabric;
 extern struct platform_device msm_bus_8064_mm_fabric;

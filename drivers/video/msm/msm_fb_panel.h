@@ -56,6 +56,11 @@ typedef enum {
 	MAX_PHYS_TARGET_NUM,
 } DISP_TARGET_PHYS;
 
+enum {
+	BLT_SWITCH_TG_OFF,
+	BLT_SWITCH_TG_ON
+};
+
 /* panel info type */
 struct lcd_panel_info {
 	__u32 vsync_enable;
@@ -177,11 +182,16 @@ struct msm_panel_info {
 	__u32 frame_rate;
 	__u32 frame_interval;
 
+	/* physical size in mm */
+	__u32 width;
+	__u32 height;
+
 	struct mddi_panel_info mddi;
 	struct lcd_panel_info lcd;
 	struct lcdc_panel_info lcdc;
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
+
 };
 
 #define MSM_FB_SINGLE_MODE_PANEL(pinfo)		\
@@ -200,6 +210,7 @@ struct msm_fb_panel_data {
 
 	/* function entry chain */
 	int (*on) (struct platform_device *pdev);
+	int (*controller_on_panel_on) (struct platform_device *pdev);
 	int (*off) (struct platform_device *pdev);
 	int (*late_init) (struct platform_device *pdev);
 	int (*early_off) (struct platform_device *pdev);

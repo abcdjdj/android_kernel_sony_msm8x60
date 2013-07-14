@@ -31,7 +31,7 @@
 #include "mipi_dsi.h"
 #include "mdp4.h"
 
-static int vsync_start_y_adjust = 4;
+static int vsync_start_y_adjust = 86;
 
 #define MAX_CONTROLLER	1
 
@@ -504,8 +504,9 @@ static void mdp4_dsi_cmd_wait4dmap(int cndx)
 
 	if (atomic_read(&vctrl->suspend) > 0)
 		return;
-
-	wait_for_completion(&vctrl->dmap_comp);
+	if (!wait_for_completion_timeout(
+			&vctrl->dmap_comp, msecs_to_jiffies(100)))
+		pr_err("%s %d  TIMEOUT_\n", __func__, __LINE__);
 }
 
 static void mdp4_dsi_cmd_wait4ov(int cndx)
@@ -522,7 +523,9 @@ static void mdp4_dsi_cmd_wait4ov(int cndx)
 	if (atomic_read(&vctrl->suspend) > 0)
 		return;
 
-	wait_for_completion(&vctrl->ov_comp);
+	if (!wait_for_completion_timeout(
+			&vctrl->ov_comp, msecs_to_jiffies(100)))
+		pr_err("%s %d  TIMEOUT_\n", __func__, __LINE__);
 }
 
 /*
@@ -1079,6 +1082,7 @@ int mdp4_dsi_cmd_on(struct platform_device *pdev)
 
 	pr_debug("%s-:\n", __func__);
 
+	pr_debug("%s-:\n", __func__);
 	return ret;
 }
 

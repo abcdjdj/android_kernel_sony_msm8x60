@@ -1650,17 +1650,6 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	down_write(&data->sem);
-	/* check this file isn't already mmaped, for submaps check this file
-	 * has never been mmaped */
-	if ((data->flags & PMEM_FLAGS_SUBMAP) ||
-	    (data->flags & PMEM_FLAGS_UNSUBMAP)) {
-#if PMEM_DEBUG
-		pr_err("pmem: you can only mmap a pmem file once, "
-		       "this file is already mmaped. %x\n", data->flags);
-#endif
-		ret = -EINVAL;
-		goto error;
-	}
 	/* if file->private_data == unalloced, alloc*/
 	if (data->index == -1) {
 		mutex_lock(&pmem[id].arena_mutex);
@@ -2008,10 +1997,11 @@ int pmem_cache_maint(struct file *file, unsigned int cmd,
 	}
 	pmem_len = pmem[id].len(id, data);
 	pmem_start_addr = pmem[id].start_addr(id, data);
-	up_read(&data->sem);
 
-	if (offset + length > pmem_len)
+	if (offset + length > pmem_len) {
+		up_read(&data->sem);
 		return -EINVAL;
+	}
 
 	vaddr = pmem_addr->vaddr;
 	paddr = pmem_start_addr + offset;
@@ -2026,7 +2016,7 @@ int pmem_cache_maint(struct file *file, unsigned int cmd,
 		clean_caches(vaddr, length, paddr);
 	else if (cmd == PMEM_INV_CACHES)
 		invalidate_caches(vaddr, length, paddr);
-
+	up_read(&data->sem);
 	return 0;
 }
 EXPORT_SYMBOL(pmem_cache_maint);

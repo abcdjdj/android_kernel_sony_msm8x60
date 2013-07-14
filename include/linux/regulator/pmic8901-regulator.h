@@ -71,6 +71,7 @@ struct pm8901_vreg_pdata {
 	unsigned			pull_down_enable;
 	unsigned			pin_ctrl;
 	enum pm8901_vreg_pin_fn		pin_fn;
+	unsigned			level;       /* For use with MPP. */
 };
 
 #endif

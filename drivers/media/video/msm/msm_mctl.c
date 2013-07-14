@@ -512,6 +512,66 @@ static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
 				core, ioctl, VIDIOC_MSM_CSIC_CFG, argp);
 		break;
 
+	default:
+		/* ISP config*/
+		D("%s:%d: go to default. Calling msm_isp_config\n",
+			__func__, __LINE__);
+		rc = p_mctl->isp_sdev->isp_config(p_mctl, cmd, arg);
+		break;
+	}
+	D("%s: !!! cmd = %d, rc = %d\n",
+		__func__, _IOC_NR(cmd), rc);
+	return rc;
+}
+
+static int msm_mctl_subdev_match_core(struct device *dev, void *data)
+{
+	int core_index = (int)data;
+	struct platform_device *pdev = to_platform_device(dev);
+
+	if (pdev->id == core_index)
+		return 1;
+	else
+		return 0;
+}
+
+static int msm_mctl_register_subdevs(struct msm_cam_media_controller *p_mctl,
+	int core_index)
+{
+	struct device_driver *driver;
+	struct device *dev;
+	int rc = -ENODEV;
+#if !defined(CONFIG_SEMC_VPE) && !defined(CONFIG_SEMC_VPE1)
+	struct msm_sensor_ctrl_t *s_ctrl = get_sctrl(p_mctl->sensor_sdev);
+	struct msm_camera_sensor_info *sinfo =
+		(struct msm_camera_sensor_info *) s_ctrl->sensordata;
+	struct msm_camera_device_platform_data *pdata = sinfo->pdata;
+#endif
+	rc = msm_csi_register_subdevs(p_mctl, core_index,
+				msm_mctl_subdev_match_core);
+
+	if (rc < 0)
+			goto out;
+
+	/* register vfe subdev */
+	driver = driver_find(MSM_VFE_DRV_NAME, &platform_bus_type);
+	if (!driver)
+		goto out;
+
+	dev = driver_find_device(driver, NULL, 0,
+				msm_mctl_subdev_match_core);
+	if (!dev)
+		goto out;
+
+	p_mctl->isp_sdev->sd = dev_get_drvdata(dev);
+
+#if !defined(CONFIG_SEMC_VPE) && !defined(CONFIG_SEMC_VPE1)
+	if (pdata->is_vpe) {
+		/* register vfe subdev */
+		driver = driver_find(MSM_VPE_DRV_NAME, &platform_bus_type);
+		if (!driver)
+			goto out;
+
 	case MSM_CAM_IOCTL_CSID_IO_CFG:
 		if (p_mctl->csid_sdev)
 			rc = v4l2_subdev_call(p_mctl->csid_sdev,
@@ -533,6 +593,11 @@ static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
 				VIDIOC_MSM_AXI_RELEASE, NULL);
 		}
 		break;
+
+		p_mctl->vpe_sdev = dev_get_drvdata(dev);
+	}
+#endif
+	rc = 0;
 
 	case MSM_CAM_IOCTL_AXI_LOW_POWER_MODE:
 		if (p_mctl->axi_sdev) {
@@ -582,7 +647,11 @@ static int msm_mctl_open(struct msm_cam_media_controller *p_mctl,
 	/* open sub devices - once only*/
 	if (!p_mctl->opencnt) {
 		struct msm_sensor_csi_info csi_info;
-		wake_lock(&p_mctl->wake_lock);
+
+		uint32_t csid_version;
+		pm_qos_update_request(&p_mctl->idle_pm_qos,
+			msm_cpuidle_get_deep_idle_latency());
+		wake_lock(&p_mctl->suspend_lock);
 
 		csid_core = camdev->csid_core;
 		rc = msm_mctl_find_sensor_subdevs(p_mctl, csid_core);
@@ -638,7 +707,8 @@ act_power_up_failed:
 		pr_err("%s: sensor powerdown failed: %d\n", __func__, rc);
 sensor_sdev_failed:
 register_sdev_failed:
-	wake_unlock(&p_mctl->wake_lock);
+	pm_qos_update_request(&p_mctl->idle_pm_qos, PM_QOS_DEFAULT_VALUE);
+	wake_unlock(&p_mctl->suspend_lock);
 	mutex_unlock(&p_mctl->lock);
 	return rc;
 }
@@ -694,10 +764,9 @@ static void msm_mctl_release(struct msm_cam_media_controller *p_mctl)
 					PM_QOS_DEFAULT_VALUE);
 		pm_qos_remove_request(&p_mctl->pm_qos_req_list);
 
-		p_mctl->opencnt--;
-		wake_unlock(&p_mctl->wake_lock);
-	}
-	mutex_unlock(&p_mctl->lock);
+	pm_qos_update_request(&p_mctl->idle_pm_qos, PM_QOS_DEFAULT_VALUE);
+	wake_unlock(&p_mctl->suspend_lock);
+	return rc;
 }
 
 int msm_mctl_init_user_formats(struct msm_cam_v4l2_device *pcam)
@@ -780,7 +849,10 @@ int msm_mctl_init(struct msm_cam_v4l2_device *pcam)
 		return -EINVAL;
 	}
 
-	wake_lock_init(&pmctl->wake_lock, WAKE_LOCK_SUSPEND, "msm_camera");
+	pm_qos_add_request(&pmctl->idle_pm_qos, PM_QOS_CPU_DMA_LATENCY,
+		PM_QOS_DEFAULT_VALUE);
+	wake_lock_init(&pmctl->suspend_lock, WAKE_LOCK_SUSPEND,
+			"msm_camera_suspend");
 	mutex_init(&pmctl->lock);
 	pmctl->opencnt = 0;
 
@@ -826,10 +898,9 @@ int msm_mctl_free(struct msm_cam_v4l2_device *pcam)
 	}
 
 	mutex_destroy(&pmctl->lock);
-	wake_lock_destroy(&pmctl->wake_lock);
-	/*clear out mctl fields*/
-	memset(pmctl, 0, sizeof(struct msm_cam_media_controller));
-	msm_cam_server_free_mctl(pcam->mctl_handle);
+	pm_qos_remove_request(&pmctl->idle_pm_qos);
+	wake_lock_destroy(&pmctl->suspend_lock);
+	msm_camera_free_mctl(pcam->mctl_handle);
 	return rc;
 }
 

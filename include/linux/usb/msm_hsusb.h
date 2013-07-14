@@ -106,6 +106,9 @@ enum msm_usb_phy_type {
  * USB_CHG_STATE_SECONDARY_DONE	Secondary detection is completed (Detects
  *                              between DCP and CDP).
  * USB_CHG_STATE_DETECTED	USB charger type is determined.
+ * USB_CHG_STATE_RECHECK	DCP can be miss-detected as SDP when user
+ *				insert USB cable very slowly. Rechecking chager
+ *				type after a while.
  *
  */
 enum usb_chg_state {
@@ -115,6 +118,7 @@ enum usb_chg_state {
 	USB_CHG_STATE_PRIMARY_DONE,
 	USB_CHG_STATE_SECONDARY_DONE,
 	USB_CHG_STATE_DETECTED,
+	USB_CHG_STATE_RECHECK,
 };
 
 /**
@@ -307,7 +311,9 @@ struct msm_otg {
 #define ID_B		3
 #define ID_C		4
 #define A_BUS_DROP	5
+#define VBUS_DROP_DET	5
 #define A_BUS_REQ	6
+#define MHL		6
 #define A_SRP_DET	7
 #define A_VBUS_VLD	8
 #define B_CONN		9
@@ -369,6 +375,8 @@ struct msm_otg {
 	u8 active_tmout;
 	struct hrtimer timer;
 	enum usb_vdd_type vdd_type;
+	struct delayed_work id_work;
+	struct workqueue_struct *wq;
 };
 
 struct msm_hsic_host_platform_data {

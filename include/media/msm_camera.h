@@ -1009,19 +1009,16 @@ struct msm_snapshot_pp_status {
 #define CFG_START_STREAM              44
 #define CFG_STOP_STREAM               45
 #define CFG_GET_CSI_PARAMS            46
-#define CFG_POWER_UP                  47
-#define CFG_POWER_DOWN                48
-#define CFG_WRITE_I2C_ARRAY           49
-#define CFG_READ_I2C_ARRAY            50
-#define CFG_PCLK_CHANGE               51
-#define CFG_CONFIG_VREG_ARRAY         52
-#define CFG_CONFIG_CLK_ARRAY          53
-#define CFG_GPIO_OP                   54
-#define CFG_SET_VISION_MODE           55
-#define CFG_SET_VISION_AE             56
-#define CFG_HDR_UPDATE                57
-#define CFG_ACTUAOTOR_REG_INIT        58
-#define CFG_MAX                       59
+
+/* extension begin */
+#define CFG_SET_GPIO_CTRL		47
+#define CFG_SET_WRITE_CMD		48
+#define CFG_SET_READ_CMD		49
+#define CFG_SET_CSI_CTRL		50
+#define CFG_GET_ROM			51
+/* extension end */
+
+#define CFG_MAX			52
 
 
 #define MOVE_NEAR	0
@@ -1244,6 +1241,77 @@ struct wb_info_cfg {
 	uint16_t green_gain;
 	uint16_t blue_gain;
 };
+
+/* extension begin */
+enum sensor_gpio_ctrl_type {
+	SENSOR_GPIO_CTRL_RESET,
+	SENSOR_GPIO_CTRL_STANBY,
+};
+
+struct sensor_gpio_ctrl {
+	enum sensor_gpio_ctrl_type gpio;
+	int value;
+};
+
+enum sensor_i2c_addr_type {
+	SENSOR_I2C_ADDR_0BYTE = 0,
+	SENSOR_I2C_ADDR_1BYTE = 1,
+	SENSOR_I2C_ADDR_2BYTE = 2,
+	SENSOR_I2C_ADDR_4BYTE = 4,
+};
+
+struct sensor_i2c_io {
+	uint8_t slave_addr;
+	uint32_t address;
+	enum sensor_i2c_addr_type address_type;
+	uint8_t length;
+	uint8_t __user *data;
+};
+
+struct sensor_csid_vc_cfg {
+	uint8_t cid;
+	uint8_t dt;
+	uint8_t decode_format;
+};
+
+struct sensor_csid_lut_params {
+	uint8_t num_cid;
+	struct sensor_csid_vc_cfg *vc_cfg;
+};
+
+struct sensor_csid_params {
+	uint8_t lane_cnt;
+	uint8_t lane_assign;
+	struct sensor_csid_lut_params lut_params;
+};
+
+struct sensor_csiphy_params {
+	uint8_t lane_cnt;
+	uint8_t settle_cnt;
+	uint8_t lane_mask;
+};
+
+#define SENSOR_CSI_EMBED_DATA	0x12
+#define SENSOR_CSI_RAW8		0x2A
+#define SENSOR_CSI_RAW10	0x2B
+#define SENSOR_CSI_RAW12	0x2C
+
+#define SENSOR_CSI_DECODE_6BIT	0
+#define SENSOR_CSI_DECODE_8BIT	1
+#define SENSOR_CSI_DECODE_10BIT	2
+
+struct sensor_csi2_params {
+	struct sensor_csid_params csid_params;
+	struct sensor_csiphy_params csiphy_params;
+};
+
+struct sensor_rom_in {
+	uint16_t address;
+	uint16_t length;
+	uint8_t __user *data;
+};
+/* extension end */
+
 struct sensor_3d_exp_cfg {
 	uint16_t gain;
 	uint32_t line;
@@ -1678,9 +1746,12 @@ struct sensor_cfg_data {
 		struct cord aec_cord;
 		int is_autoflash;
 		struct mirror_flip mirror_flip;
-		void *setting;
-		int32_t vision_mode_enable;
-		int32_t vision_ae;
+		/* extension begin */
+		struct sensor_gpio_ctrl gpio_ctrl;
+		struct sensor_i2c_io i2c_io;
+		struct sensor_csi2_params csi_ctrl;
+		struct sensor_rom_in rom_in;
+		/* extension end */
 	} cfg;
 };
 

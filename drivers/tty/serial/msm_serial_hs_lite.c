@@ -98,6 +98,7 @@ static const unsigned int regmap[][UARTDM_LAST] = {
 		[UARTDM_DMRX] = UARTDM_DMRX_ADDR,
 		[UARTDM_NCF_TX] = UARTDM_NCF_TX_ADDR,
 		[UARTDM_DMEN] = UARTDM_DMEN_ADDR,
+		[UARTDM_IRDA] = UARTDM_IRDA_ADDR,
 		[UARTDM_TXFS] = UARTDM_TXFS_ADDR,
 		[UARTDM_RXFS] = UARTDM_RXFS_ADDR,
 	},
@@ -119,8 +120,9 @@ static const unsigned int regmap[][UARTDM_LAST] = {
 		[UARTDM_DMRX] = 0x34,
 		[UARTDM_NCF_TX] = 0x40,
 		[UARTDM_DMEN] = 0x3c,
+		[UARTDM_IRDA] = 0xffff, /* unsupport */
 		[UARTDM_TXFS] = 0x4c,
-		[UARTDM_RXFS] = 0x50,
+		[UARTDM_RXFS] = 0x50,		
 	},
 };
 
@@ -139,6 +141,7 @@ static inline int get_console_state(struct uart_port *port) { return -ENODEV; };
 
 static struct dentry *debug_base;
 static inline void wait_for_xmitr(struct uart_port *port);
+static int get_console_state(struct uart_port *port);
 static inline void msm_hsl_write(struct uart_port *port,
 				 unsigned int val, unsigned int off)
 {
@@ -770,6 +773,11 @@ static int msm_hsl_startup(struct uart_port *port)
 		printk(KERN_ERR "%s: failed to request_irq\n", __func__);
 		return ret;
 	}
+	if (pdata && pdata->type == PORT_IRDA &&
+		regmap[vid][UARTDM_IRDA] != 0xffff)
+		msm_hsl_write(port, (UARTDM_IRDA_INVERT_RX_BMSK |
+					UARTDM_IRDA_EN_BMSK),
+					regmap[vid][UARTDM_IRDA]);
 	return 0;
 }
 
@@ -783,6 +791,10 @@ static void msm_hsl_shutdown(struct uart_port *port)
 	msm_hsl_port->imr = 0;
 	/* disable interrupts */
 	msm_hsl_write(port, 0, regmap[msm_hsl_port->ver_id][UARTDM_IMR]);
+	if (pdata && pdata->type == PORT_IRDA &&
+		regmap[msm_hsl_port->ver_id][UARTDM_IRDA] != 0xffff)
+		msm_hsl_write(port, 0,
+				regmap[msm_hsl_port->ver_id][UARTDM_IRDA]);
 
 	free_irq(port->irq, port);
 
@@ -1071,6 +1083,15 @@ static struct msm_hsl_port msm_hsl_uart_ports[] = {
 			.flags = UPF_BOOT_AUTOCONF,
 			.fifosize = 64,
 			.line = 2,
+		},
+	},
+	{
+		.uart = {
+			.iotype = UPIO_MEM,
+			.ops = &msm_hsl_uart_pops,
+			.flags = UPF_BOOT_AUTOCONF,
+			.fifosize = 64,
+			.line = 3,
 		},
 	},
 };

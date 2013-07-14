@@ -922,6 +922,7 @@ static int rfcomm_send_nsc(struct rfcomm_session *s, int cr, u8 type)
 	u8 buf[16], *ptr = buf;
 
 	BT_DBG("%p cr %d type %d", s, cr, type);
+	cr = cr >> 1;
 
 	hdr = (void *) ptr; ptr += sizeof(*hdr);
 	hdr->addr = __addr(s->initiator, 0);
@@ -929,7 +930,7 @@ static int rfcomm_send_nsc(struct rfcomm_session *s, int cr, u8 type)
 	hdr->len  = __len8(sizeof(*mcc) + 1);
 
 	mcc = (void *) ptr; ptr += sizeof(*mcc);
-	mcc->type = __mcc_type(cr, RFCOMM_NSC);
+	mcc->type = __mcc_type(0, RFCOMM_NSC);
 	mcc->len  = __len8(1);
 
 	/* Type that we didn't like */
@@ -1687,8 +1688,6 @@ static int rfcomm_recv_mcc(struct rfcomm_session *s, struct sk_buff *skb)
 		break;
 
 	case RFCOMM_NSC:
-		break;
-
 	default:
 		BT_ERR("Unknown control type 0x%02x", type);
 		rfcomm_send_nsc(s, cr, type);

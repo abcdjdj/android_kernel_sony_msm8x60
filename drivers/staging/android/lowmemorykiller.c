@@ -18,6 +18,7 @@
  * and processes may not get killed until the normal oom killer is triggered.
  *
  * Copyright (C) 2007-2008 Google, Inc.
+ * Copyright (C) 2012-2013 Sony Mobile Communications AB.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -58,7 +59,20 @@ static int lowmem_minfree[6] = {
 static int lowmem_minfree_size = 4;
 static int lmk_fast_run = 1;
 
-static unsigned long lowmem_deathpending_timeout;
+static ktime_t lowmem_deathpending_timeout;
+
+static LIST_HEAD(ignorelist_head);
+struct killed_info {
+	int marked;
+	unsigned long jiffies;
+	char comm[TASK_COMM_LEN];
+	struct list_head list;
+};
+static struct killed_info *ignorelist_mempool;
+static unsigned int ignore_timeout_sec = 60;
+static DEFINE_SPINLOCK(lock_ignorelist);
+#define MAX_IGNORELIST 100
+#define LMK_BUSY (-1)
 
 #define lowmem_print(level, x...)			\
 	do {						\
@@ -221,9 +235,16 @@ static DEFINE_MUTEX(scan_mutex);
 
 static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 {
+	static DEFINE_SPINLOCK(lowmem_lock);
 	struct task_struct *tsk;
 	struct task_struct *selected = NULL;
 	int rem = 0;
+	static int same_count;
+	static int busy_count;
+	static int busy_count_dropped;
+	static int oldpid;
+	static int lastpid;
+	static ktime_t next_busy_print;
 	int tasksize;
 	int i;
 	int min_score_adj = OOM_SCORE_ADJ_MAX + 1;
@@ -275,6 +296,20 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	}
 	selected_oom_score_adj = min_score_adj;
 
+	if (spin_trylock(&lowmem_lock) == 0) {
+		if (ktime_us_delta(ktime_get(), next_busy_print) > 0) {
+			lowmem_print(3, "Lowmemkiller busy %d %d %d\n",
+				busy_count, busy_count_dropped,
+				oom_killer_disabled);
+			next_busy_print = ktime_add(ktime_get(),
+						    ktime_set(5, 0));
+			busy_count_dropped = 0;
+		}
+		busy_count++;
+		busy_count_dropped++;
+		return LMK_BUSY;
+	}
+	/* turn of scheduling to protect task list */
 	rcu_read_lock();
 	for_each_process(tsk) {
 		struct task_struct *p;
@@ -308,6 +343,11 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		}
 		tasksize = get_mm_rss(p->mm);
 		task_unlock(p);
+
+		/* Check recently killed list */
+		if (is_recently_selected(p->comm))
+			continue;
+
 		if (tasksize <= 0)
 			continue;
 		if (selected) {
@@ -320,15 +360,39 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		selected = p;
 		selected_tasksize = tasksize;
 		selected_oom_score_adj = oom_score_adj;
-		lowmem_print(2, "select %d (%s), adj %d, size %d, to kill\n",
+		lowmem_print(4, "select %d (%s), adj %d, size %d, to kill\n",
 			     p->pid, p->comm, oom_score_adj, tasksize);
 	}
 	if (selected) {
+		/* Add recently killed list */
+		int i;
+
+		spin_lock(&lock_ignorelist);
+		for (i = 0; i < MAX_IGNORELIST; i++) {
+			struct killed_info *ki;
+			ki = ignorelist_mempool + i;
+			if (ki->marked == 0) {
+				strlcpy(ki->comm, selected->comm,
+					TASK_COMM_LEN);
+				ki->jiffies = jiffies;
+				ki->marked = 1;
+				list_add(&ki->list, &ignorelist_head);
+				break;
+			}
+		}
+		spin_unlock(&lock_ignorelist);
+
 		lowmem_print(1, "send sigkill to %d (%s), adj %d, size %d\n",
 			     selected->pid, selected->comm,
 			     selected_oom_score_adj, selected_tasksize);
-		lowmem_deathpending_timeout = jiffies + HZ;
 		send_sig(SIGKILL, selected, 0);
+
+		lowmem_deathpending_timeout = ktime_add_ns(ktime_get(),
+							   NSEC_PER_SEC/2);
+		lowmem_print(2, "state:%ld flag:0x%x busy:%d %d\n",
+			     selected->state, selected->flags,
+			     busy_count, oom_killer_disabled);
+		lastpid = selected->pid;
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		rem -= selected_tasksize;
 		rcu_read_unlock();
@@ -350,12 +414,24 @@ static struct shrinker lowmem_shrinker = {
 
 static int __init lowmem_init(void)
 {
+	ignorelist_mempool = (struct killed_info *)
+		kzalloc(sizeof(struct killed_info) * MAX_IGNORELIST,
+			GFP_KERNEL);
+	if (ignorelist_mempool == NULL)
+		return -ENOMEM;
 	register_shrinker(&lowmem_shrinker);
 	return 0;
 }
 
 static void __exit lowmem_exit(void)
 {
+	while (!list_empty(&ignorelist_head)) {
+		struct killed_info *ki;
+		ki = list_entry(ignorelist_head.next,
+			struct killed_info, list);
+		list_del(&ki->list);
+	}
+	kfree(ignorelist_mempool);
 	unregister_shrinker(&lowmem_shrinker);
 }
 

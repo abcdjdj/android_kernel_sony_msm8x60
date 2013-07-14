@@ -193,6 +193,9 @@ static int vt_event_wait_ioctl(struct vt_event __user *event)
 int vt_waitactive(int n)
 {
 	struct vt_event_wait vw;
+	unsigned long flags;
+	INIT_LIST_HEAD(&vw.list);
+
 	do {
 		vw.event.event = VT_EVENT_SWITCH;
 		__vt_event_queue(&vw);
