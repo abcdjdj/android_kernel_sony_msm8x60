@@ -2221,7 +2221,6 @@ static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 			ret = -ENOIOCTLCMD;
 			goto done;
 		}
-
 		func = kgsl_ioctl_funcs[nr].func;
 		lock = kgsl_ioctl_funcs[nr].lock;
 	} else {

@@ -302,10 +302,16 @@ struct mdp4_overlay_pipe {
 	uint32 is_fg;		/* control alpha & color key */
 	uint32 srcp0_addr;	/* interleave, luma */
 	uint32 srcp0_ystride;
+	struct file *srcp0_file;
+	int put0_need;
 	uint32 srcp1_addr;	/* pseudoplanar, chroma plane */
 	uint32 srcp1_ystride;
+	struct file *srcp1_file;
+	int put1_need;
 	uint32 srcp2_addr;	/* planar color 2*/
 	uint32 srcp2_ystride;
+	struct file *srcp2_file;
+	int put2_need;
 	uint32 srcp3_addr;	/* alpha/color 3 */
 	uint32 srcp3_ystride;
 	uint32 fetch_plane;
@@ -517,7 +523,7 @@ static inline void mdp4_dtv_overlay_blt_stop(struct msm_fb_data_type *mfd)
 {
 	return;
 }
-static inline void mdp4_dtv_base_swap(struct mdp4_overlay_pipe *pipe)
+static inline void mdp4_dtv_base_swap(int cndx, struct mdp4_overlay_pipe *pipe)
 {
 	/* empty */
 }
@@ -549,6 +555,14 @@ void mdp4_dsi_rdptr_init(int cndx);
 void mdp4_dsi_vsync_init(int cndx);
 void mdp4_lcdc_vsync_init(int cndx);
 void mdp4_dtv_vsync_init(int cndx);
+ssize_t mdp4_dsi_cmd_show_event(struct device *dev,
+	struct device_attribute *attr, char *buf);
+ssize_t mdp4_dsi_video_show_event(struct device *dev,
+	struct device_attribute *attr, char *buf);
+ssize_t mdp4_lcdc_show_event(struct device *dev,
+	struct device_attribute *attr, char *buf);
+ssize_t mdp4_dtv_show_event(struct device *dev,
+	struct device_attribute *attr, char *buf);
 void mdp4_overlay_dsi_state_set(int state);
 int mdp4_overlay_dsi_state_get(void);
 void mdp4_overlay_rgb_setup(struct mdp4_overlay_pipe *pipe);

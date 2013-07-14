@@ -315,7 +315,7 @@ static void mdp4_dtv_wait4dmae(int cndx)
 	wait_for_completion(&vctrl->dmae_comp);
 }
 
-static ssize_t vsync_show_event(struct device *dev,
+ssize_t mdp4_dtv_show_event(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int cndx;
@@ -370,7 +370,7 @@ void mdp4_dtv_vsync_init(int cndx)
 	init_completion(&vctrl->vsync_comp);
 	init_completion(&vctrl->ov_comp);
 	init_completion(&vctrl->dmae_comp);
-	atomic_set(&vctrl->suspend, 0);
+	atomic_set(&vctrl->suspend, 1);
 	atomic_set(&vctrl->vsync_resume, 1);
 	spin_lock_init(&vctrl->spin_lock);
 }
@@ -531,15 +531,6 @@ static int mdp4_dtv_stop(struct msm_fb_data_type *mfd)
 	return 0;
 }
 
-static DEVICE_ATTR(vsync_event, S_IRUGO, vsync_show_event, NULL);
-static struct attribute *vsync_fs_attrs[] = {
-	&dev_attr_vsync_event.attr,
-	NULL,
-};
-static struct attribute_group vsync_fs_attr_group = {
-	.attrs = vsync_fs_attrs,
-};
-
 int mdp4_dtv_on(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd;
@@ -579,20 +570,6 @@ int mdp4_dtv_on(struct platform_device *pdev)
 		pr_warn("%s: panel_next_on failed", __func__);
 
 	atomic_set(&vctrl->suspend, 0);
-
-	if (!vctrl->sysfs_created) {
-		ret = sysfs_create_group(&vctrl->dev->kobj,
-			&vsync_fs_attr_group);
-		if (ret) {
-			pr_err("%s: sysfs group creation failed, ret=%d\n",
-				__func__, ret);
-			return ret;
-		}
-
-		kobject_uevent(&vctrl->dev->kobj, KOBJ_ADD);
-		pr_debug("%s: kobject_uevent(KOBJ_ADD)\n", __func__);
-		vctrl->sysfs_created = 1;
-	}
 	pr_info("%s:\n", __func__);
 
 	return ret;
@@ -603,8 +580,10 @@ int mdp4_dtv_off(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd;
 	int ret = 0;
 	int cndx = 0;
+	int undx;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
+	struct vsync_update *vp;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 
@@ -644,6 +623,21 @@ int mdp4_dtv_off(struct platform_device *pdev)
 	}
 
 	mdp4_overlay_panel_mode_unset(MDP4_MIXER1, MDP4_PANEL_DTV);
+
+	if (vctrl->vsync_irq_enabled) {
+		vctrl->vsync_irq_enabled = 0;
+		vsync_irq_disable(INTR_PRIMARY_VSYNC, MDP_PRIM_VSYNC_TERM);
+	}
+
+	undx =  vctrl->update_ndx;
+	vp = &vctrl->vlist[undx];
+	if (vp->update_cnt) {
+		/*
+		 * pipe's iommu will be freed at next overlay play
+		 * and iommu_drop statistic will be increased by one
+		 */
+		vp->update_cnt = 0;     /* empty queue */
+	}
 
 	ret = panel_next_off(pdev);
 	mdp_footswitch_ctrl(FALSE);
