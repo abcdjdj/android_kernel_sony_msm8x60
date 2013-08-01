@@ -11,7 +11,7 @@ NAME = Saber-toothed Squirrel
 # Use 1 for a basic optimizations set.
 # Use 2 for an advanced optimizations set.
 # NOTE: You MUST set this variable, else compiling will fail.
-EOS=2
+EOS=0
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
