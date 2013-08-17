@@ -1149,6 +1149,7 @@ int mdp4_dsi_cmd_off(struct platform_device *pdev)
 void mdp_dsi_cmd_overlay_suspend(struct msm_fb_data_type *mfd)
 {
 	int cndx = 0;
+	int mixer = 0;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
 
@@ -1188,7 +1189,7 @@ void mdp_dsi_cmd_overlay_suspend(struct msm_fb_data_type *mfd)
 	mutex_unlock(&mfd->dma->ov_mutex);
 
 	pr_debug("%s-:\n", __func__);
-	return ret;
+	//return ret;
 }
 
 static int mdp4_dsi_cmd_clk_check(struct vsycn_ctrl *vctrl)
