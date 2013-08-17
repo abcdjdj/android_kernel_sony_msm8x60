@@ -3260,21 +3260,30 @@ int mdp4_overlay_set(struct fb_info *info, struct mdp_overlay *req)
 		}
 		else if(pipe->pipe_num == OVERLAY_PIPE_VG2)
 		{
-			
+
 			printk("### vg 2\n");
 			which_pipe_for_DMB = 2;
 		}
 
-	if ((pipe->flags & MDP_BACKEND_COMPOSITION) &&
-		((mdp4_calc_pipe_mdp_clk(mfd, pipe) == 0 &&
-		pipe->req_clk > mdp_max_clk)))
-	{
-		if (req->id == MSMFB_NEW_REQUEST)
-			mdp4_overlay_pipe_free(pipe);
-		mutex_unlock(&mfd->dma->ov_mutex);
-		pr_info("do not fall back to BLT when backend_composition\n");
-		return -EINVAL;
+		if(which_pipe_for_DMB)
+		{
+			printk("### call mdp4_vg_qseed_init_DMB\n");
+			mdp4_vg_qseed_init_DMB(which_pipe_for_DMB-1);
+			sharpness_tuneT(SharpValue, (which_pipe_for_DMB-1)); 
+			DMB_Qseed_change = 0;		
+
+		}
 	}
+
+	if(DMB_Qseed_change == 2 && which_pipe_for_DMB > 0)
+	{
+
+		printk("### call mdp4_vg_qseed_init_VideoPlay\n");
+		mdp4_vg_qseed_init_VideoPlay(which_pipe_for_DMB-1);
+		DMB_Qseed_change = 0;
+		which_pipe_for_DMB = 0;
+	}
+#endif
 
 	/* return id back to user */
 	req->id = pipe->pipe_ndx;	/* pipe_ndx start from 1 */
