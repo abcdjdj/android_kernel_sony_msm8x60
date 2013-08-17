@@ -3664,8 +3664,7 @@ mddi:
 		mdp4_hsic_update(pipe);
 NEED HSIC CODE */
 
-	if (!(pipe->flags & MDP_OV_PLAY_NOWAIT))
-		mdp4_iommu_unmap(pipe);
+
 	mdp4_stat.overlay_play[pipe->mixer_num]++;
 
 end:
