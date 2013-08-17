@@ -1100,7 +1100,6 @@ static void msm_fb_imageblit(struct fb_info *info, const struct fb_image *image)
 static int msm_fb_blank(int blank_mode, struct fb_info *info)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-	int ret;
 
 	if (blank_mode == FB_BLANK_POWERDOWN) {
 		struct fb_event event;
