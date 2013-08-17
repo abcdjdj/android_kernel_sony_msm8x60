@@ -2034,6 +2034,7 @@ void mdp4_mixer_blend_setup(int mixer)
 {
 	struct mdp4_overlay_pipe *d_pipe;
 	struct mdp4_overlay_pipe *s_pipe;
+	struct mdp4_overlay_perf *perf_cur = &perf_current;
 	struct blend_cfg *blend;
 	int i, off, ptype, alpha_drop;
 	int d_alpha, s_alpha;
@@ -2835,7 +2836,7 @@ int mdp4_overlay_mdp_perf_req(struct msm_fb_data_type *mfd)
 	u32 worst_mdp_clk = 0;
 	int i;
 	struct mdp4_overlay_perf *perf_req = &perf_request;
-	struct mdp4_overlay_perf *perf_cur = &perf_current;
+	//struct mdp4_overlay_perf *perf_cur = &perf_current;
 	struct mdp4_overlay_pipe *pipe;
 	u32 cnt = 0;
 	int ret = -EINVAL;
