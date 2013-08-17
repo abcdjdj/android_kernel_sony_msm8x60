@@ -107,12 +107,7 @@ static int mipi_dsi_off(struct platform_device *pdev)
 	ret = panel_next_off(pdev);
 
 #ifdef CONFIG_MSM_BUS_SCALING
-	mdp_bus_scale_update_request(0);
-
-#if defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) || \
-	defined(CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL)
-
-	MIPI_OUTP(MIPI_DSI_BASE + 0xA8, 0x00000000); // for LCD-on when wakeup
+	mdp_bus_scale_update_request(0, 0);
 #endif
 
 	spin_lock_bh(&dsi_clk_lock);
@@ -323,7 +318,8 @@ static int mipi_dsi_on(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_MSM_BUS_SCALING
-	mdp_bus_scale_update_request(2);
+	mdp_bus_scale_update_request
+	  (MDP_BUS_SCALE_INIT, MDP_BUS_SCALE_INIT);
 #endif
 
 	if (mdp_rev >= MDP_REV_41)
