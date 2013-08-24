@@ -22,6 +22,8 @@
 #include <linux/tick.h>
 #include <linux/ktime.h>
 #include <linux/sched.h>
+#include <linux/input.h>
+#include <linux/workqueue.h>
 #include <linux/slab.h>
 
 /*
@@ -122,6 +124,10 @@ static unsigned int dbs_enable;	/* number of CPUs using this policy */
  * dbs_mutex protects dbs_enable in governor start/stop.
  */
 static DEFINE_MUTEX(dbs_mutex);
+
+static struct workqueue_struct *input_wq;
+
+static DEFINE_PER_CPU(struct work_struct, dbs_refresh_work);
 
 static struct dbs_tuners {
 	unsigned int sampling_rate;
@@ -1181,6 +1187,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 static int __init cpufreq_gov_dbs_init(void)
 {
 	u64 idle_time;
+	unsigned int i;
 	int cpu = get_cpu();
 
 	idle_time = get_cpu_idle_time_us(cpu, NULL);
@@ -1202,12 +1209,25 @@ static int __init cpufreq_gov_dbs_init(void)
 			MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10);
 	}
 
+	input_wq = create_workqueue("iewq");
+	if (!input_wq) {
+		printk(KERN_ERR "Failed to create iewq workqueue\n");
+		return -EFAULT;
+	}
+	for_each_possible_cpu(i) {
+		struct cpu_dbs_info_s *this_dbs_info =
+			&per_cpu(od_cpu_dbs_info, i);
+		mutex_init(&this_dbs_info->timer_mutex);
+		INIT_WORK(&per_cpu(dbs_refresh_work, i), dbs_refresh_callback);
+	}
+
 	return cpufreq_register_governor(&cpufreq_gov_ondemand);
 }
 
 static void __exit cpufreq_gov_dbs_exit(void)
 {
 	cpufreq_unregister_governor(&cpufreq_gov_ondemand);
+	destroy_workqueue(input_wq);
 }
 
 
