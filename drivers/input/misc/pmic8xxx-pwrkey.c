@@ -64,7 +64,6 @@ static irqreturn_t pwrkey_release_irq(int irq, void *_pwrkey)
 {
 	struct pmic8xxx_pwrkey *pwrkey = _pwrkey;
 
-<<<<<<< HEAD
 	if (pwrkey->press == false) {
 		input_report_key(pwrkey->pwr, KEY_POWER, 1);
 		input_sync(pwrkey->pwr);
@@ -73,11 +72,10 @@ static irqreturn_t pwrkey_release_irq(int irq, void *_pwrkey)
 		pwrkey->press = false;
 	}
 
-=======
+
 #ifdef CONFIG_PMIC8XXX_FORCECRASH
 	pmic8xxx_forcecrash_timer_setup(0);
 #endif
->>>>>>> fc337ff... Import of Sony 6.2.B.200 fuji sources
 	input_report_key(pwrkey->pwr, KEY_POWER, 0);
 	input_sync(pwrkey->pwr);
 
