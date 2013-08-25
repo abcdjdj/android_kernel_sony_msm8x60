@@ -1,5 +1,4 @@
-/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,6 +33,9 @@ uint32 hdmi_inp(uint32 offset);
 #define HDMI_INP(offset)		inpdw(MSM_HDMI_BASE+(offset))
 #endif
 
+// a software workaround for a potential HW problem with HDMI which exists on V1 and V2 8660 units
+#define WORKAROUND_FOR_HDMI_CURRENT_LEAKAGE_FIX
+
 
 /*
  * Ref. HDMI 1.4a
@@ -54,7 +56,6 @@ struct hdmi_msm_cec_msg {
 struct hdmi_msm_state_type {
 	boolean panel_power_on;
 	boolean hpd_initialized;
-	boolean hpd_state_in_isr;
 #ifdef CONFIG_SUSPEND
 	boolean pm_suspended;
 #endif
@@ -62,7 +63,6 @@ struct hdmi_msm_state_type {
 	boolean full_auth_done;
 	boolean hpd_during_auth;
 	struct work_struct hpd_state_work;
-	struct timer_list hpd_state_timer;
 	struct completion ddc_sw_done;
 
 	bool hdcp_enable;
@@ -109,7 +109,10 @@ struct hdmi_msm_state_type {
 	void __iomem *hdmi_io;
 
 	struct external_common_state_type common;
-	boolean is_mhl_enabled;
+	boolean hpd_on_offline;
+	boolean mhl_hpd_state;
+	boolean	boot_completion;
+
 	struct completion hpd_event_processed;
 };
 
@@ -124,7 +127,7 @@ void hdmi_phy_reset(void);
 void hdmi_msm_reset_core(void);
 void hdmi_msm_init_phy(int video_format);
 void hdmi_msm_powerdown_phy(void);
-void hdmi_frame_ctrl_cfg(const struct hdmi_disp_mode_timing_type *timing);
+void hdmi_frame_ctrl_cfg(const struct msm_hdmi_mode_timing_info *timing);
 void hdmi_msm_phy_status_poll(void);
 #endif
 
@@ -135,5 +138,5 @@ void hdmi_msm_cec_msg_recv(void);
 void hdmi_msm_cec_one_touch_play(void);
 void hdmi_msm_cec_msg_send(struct hdmi_msm_cec_msg *msg);
 #endif /* CONFIG_FB_MSM_HDMI_MSM_PANEL_CEC_SUPPORT */
-void mhl_connect_api(boolean on);
+
 #endif /* __HDMI_MSM_H__ */

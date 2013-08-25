@@ -127,6 +127,7 @@ struct mipi_panel_info {
 	char bllp_power_stop;
 	char traffic_mode;
 	char frame_rate;
+
 	/* command mode */
 	char interleave_max;
 	char insert_dcs_cmd;
@@ -205,7 +206,6 @@ struct msm_fb_panel_data {
 
 	/* function entry chain */
 	int (*on) (struct platform_device *pdev);
-	int (*controller_on_panel_on) (struct platform_device *pdev);
 	int (*off) (struct platform_device *pdev);
 	int (*late_init) (struct platform_device *pdev);
 	int (*early_off) (struct platform_device *pdev);

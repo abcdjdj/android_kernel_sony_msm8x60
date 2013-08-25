@@ -1,6 +1,5 @@
-/*
- * Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012 Sony Mobile Communications AB.
+
+/* Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,7 +25,6 @@
 #include <linux/uaccess.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
-#include <linux/iopoll.h>
 
 #include <asm/system.h>
 #include <asm/mach-types.h>
@@ -343,12 +341,12 @@ int mipi_dsi_buf_alloc(struct dsi_buf *dp, int size)
 
 void mipi_dsi_buf_release(struct dsi_buf *dp)
 {
-	kfree(dp->start);
-	dp->start = NULL;
-	dp->end = NULL;
-	dp->data = NULL;
-	dp->size = 0;
-	dp->len = 0;
+  kfree(dp->start);
+  dp->start = NULL;
+  dp->end = NULL;
+  dp->data = NULL;
+  dp->size = 0;
+  dp->len = 0;
 }
 
 /*
@@ -922,7 +920,13 @@ void mipi_dsi_host_init(struct mipi_panel_info *pinfo)
 
 	/* from frame buffer, low power mode */
 	/* DSI_COMMAND_MODE_DMA_CTRL */
-	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);
+#if !defined (CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) && \
+	!defined (CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL)
+
+	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000); // lp
+#else
+	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000); // hs
+#endif
 
 	data = 0;
 	if (pinfo->te_sel)
@@ -961,6 +965,11 @@ void mipi_dsi_host_init(struct mipi_panel_info *pinfo)
 	else
 		MIPI_OUTP(MIPI_DSI_BASE + 0x118, 0x33f); /* DSI_CLK_CTRL */
 
+#if defined(CONFIG_FB_MSM_MIPI_S6E8AA0_HD720_PANEL) || \
+defined(CONFIG_FB_MSM_MIPI_S6E8AA0_WXGA_Q1_PANEL)
+	// add following line.
+	MIPI_OUTP(MIPI_DSI_BASE + 0xA8, 0x10000000);
+#endif
 	dsi_ctrl |= BIT(0);	/* enable dsi */
 	MIPI_OUTP(MIPI_DSI_BASE + 0x0000, dsi_ctrl);
 
@@ -992,29 +1001,30 @@ void mipi_dsi_controller_cfg(int enable)
 
 	uint32 dsi_ctrl;
 	uint32 status;
-	u32 sleep_us = 1000;
-	u32 timeout_us = 16000;
+	int cnt;
 
-	/* Check for CMD_MODE_DMA_BUSY */
-	if (readl_poll_timeout((MIPI_DSI_BASE + 0x0004),
-			   status,
-			   ((status & 0x02) == 0),
-			       sleep_us, timeout_us))
+	cnt = 16;
+	while (cnt--) {
+		status = MIPI_INP(MIPI_DSI_BASE + 0x0004);
+		status &= 0x02;		/* CMD_MODE_DMA_BUSY */
+		if (status == 0)
+			break;
+		usleep(1000);
+	}
+	if (cnt == 0)
 		pr_info("%s: DSI status=%x failed\n", __func__, status);
 
-	/* Check for x_HS_FIFO_EMPTY */
-	if (readl_poll_timeout((MIPI_DSI_BASE + 0x0008),
-			   status,
-			   ((status & 0x11111000) == 0x11111000),
-			       sleep_us, timeout_us))
+	cnt = 16;
+	while (cnt--) {
+		status = MIPI_INP(MIPI_DSI_BASE + 0x0008);
+		status &= 0x11111000;	/* x_HS_FIFO_EMPTY */
+		if (status == 0x11111000)	/* all empty */
+			break;
+		usleep(1000);
+	}
+
+	if (cnt == 0)
 		pr_info("%s: FIFO status=%x failed\n", __func__, status);
-
-	/* Check for VIDEO_MODE_ENGINE_BUSY */
-	if (readl_poll_timeout((MIPI_DSI_BASE + 0x0004),
-			   status,
-			   ((status & 0x08) == 0),
-			       sleep_us, timeout_us))
-		pr_info("%s: DSI status=%x failed\n", __func__, status);
 
 	dsi_ctrl = MIPI_INP(MIPI_DSI_BASE + 0x0000);
 	if (enable)
@@ -1304,6 +1314,16 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 		if (len > MIPI_DSI_LEN)
 			len = MIPI_DSI_LEN;	/* 8 bytes at most */
 
+		len = (len + 3) & ~0x03; /* len 4 bytes align */
+		diff = len - rlen;
+		/*
+		 * add extra 2 bytes to len to have overall
+		 * packet size is multipe by 4. This also make
+		 * sure 4 bytes dcs headerlocates within a
+		 * 32 bits register after shift in.
+		 * after all, len should be either 6 or 10.
+		 */
+		len += 2;
 		cnt = len + 6; /* 4 bytes header + 2 bytes crc */
 	}
 
@@ -1311,8 +1331,6 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 		/* make sure mdp dma is not txing pixel data */
 #ifdef CONFIG_FB_MSM_MDP303
 			mdp3_dsi_cmd_dma_busy_wait(mfd);
-#else
-			mipi_dsi_mdp_busy_wait();
 #endif
 	}
 
@@ -1333,7 +1351,6 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 	/* transmit read comamnd to client */
 	mipi_dsi_cmd_dma_tx(tp);
 
-	mipi_dsi_disable_irq(DSI_CMD_TERM);
 	/*
 	 * once cmd_dma_done interrupt received,
 	 * return data from client is ready and stored
@@ -1349,8 +1366,6 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 	}
 
 	mipi_dsi_cmd_dma_rx(rp, cnt);
-	diff = rp->len - cnt;
-	rp->data += diff;
 
 	if (mfd->panel_info.mipi.no_max_pkt_size) {
 		/*
@@ -1379,6 +1394,8 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 	case DTYPE_GEN_LREAD_RESP:
 	case DTYPE_DCS_LREAD_RESP:
 		mipi_dsi_long_read_resp(rp);
+		rp->len -= 2; /* extra 2 bytes added */
+		rp->len -= diff; /* align bytes */
 		break;
 	default:
 		break;
@@ -1411,6 +1428,16 @@ int mipi_dsi_cmds_rx_new(struct dsi_buf *tp, struct dsi_buf *rp,
 		if (len > MIPI_DSI_LEN)
 			len = MIPI_DSI_LEN;	/* 8 bytes at most */
 
+		len = (len + 3) & ~0x03; /* len 4 bytes align */
+		diff = len - rlen;
+		/*
+		 * add extra 2 bytes to len to have overall
+		 * packet size is multipe by 4. This also make
+		 * sure 4 bytes dcs headerlocates within a
+		 * 32 bits register after shift in.
+		 * after all, len should be either 6 or 10.
+		 */
+		len += 2;
 		cnt = len + 6; /* 4 bytes header + 2 bytes crc */
 	}
 
@@ -1433,7 +1460,6 @@ int mipi_dsi_cmds_rx_new(struct dsi_buf *tp, struct dsi_buf *rp,
 	/* transmit read comamnd to client */
 	mipi_dsi_cmd_dma_tx(tp);
 
-	mipi_dsi_disable_irq(DSI_CMD_TERM);
 	/*
 	 * once cmd_dma_done interrupt received,
 	 * return data from client is ready and stored
@@ -1449,8 +1475,6 @@ int mipi_dsi_cmds_rx_new(struct dsi_buf *tp, struct dsi_buf *rp,
 	}
 
 	mipi_dsi_cmd_dma_rx(rp, cnt);
-	diff = rp->len - cnt;
-	rp->data += diff;
 
 	if (req->flags & CMD_REQ_NO_MAX_PKT_SIZE) {
 		/*
@@ -1479,6 +1503,8 @@ int mipi_dsi_cmds_rx_new(struct dsi_buf *tp, struct dsi_buf *rp,
 	case DTYPE_GEN_LREAD_RESP:
 	case DTYPE_DCS_LREAD_RESP:
 		mipi_dsi_long_read_resp(rp);
+		rp->len -= 2; /* extra 2 bytes added */
+		rp->len -= diff; /* align bytes */
 		break;
 	default:
 		break;
@@ -1491,6 +1517,8 @@ int mipi_dsi_cmd_dma_tx(struct dsi_buf *tp)
 {
 
 	unsigned long flags;
+	unsigned long ret_completion;
+	int ret = 0;
 
 #ifdef DSI_HOST_DEBUG
 	int i;
@@ -1498,7 +1526,7 @@ int mipi_dsi_cmd_dma_tx(struct dsi_buf *tp)
 
 	bp = tp->data;
 
-	pr_debug("%s: ", __func__);
+	pr_debug("%s: (len=%d) ", __func__, tp->len );
 	for (i = 0; i < tp->len; i++)
 		pr_debug("%x ", *bp++);
 
@@ -1527,11 +1555,24 @@ int mipi_dsi_cmd_dma_tx(struct dsi_buf *tp)
 	wmb();
 	spin_unlock_irqrestore(&dsi_mdp_lock, flags);
 
+#if 0 // If LCD disconnected, this code cannot be pass. wait unlimited time.
 	wait_for_completion(&dsi_dma_comp);
+	ret = tp->len;
+#else // wait, and return error when Timeout.
+	ret_completion = wait_for_completion_timeout( &dsi_dma_comp, MIPI_DSI_TX_TIMEOUT_ms );
+	if( ret_completion == 0 )	{
+		pr_err("mipi_dsi_cmd_dma_tx FAILED : return = %lu (%x %x %x %x)\n", 
+			ret_completion, tp->data[0], tp->data[1], tp->data[2], tp->data[3] );
+		ret = -1; // return error code;
+	}
+	else {
+		ret = tp->len;
+	}
+#endif 
 
 	dma_unmap_single(&dsi_dev, tp->dmap, tp->len, DMA_TO_DEVICE);
 	tp->dmap = 0;
-	return tp->len;
+	return ret;
 }
 
 int mipi_dsi_cmd_dma_rx(struct dsi_buf *rp, int rlen)
@@ -1620,13 +1661,14 @@ void mipi_dsi_cmdlist_tx(struct dcs_cmd_req *req)
 		ret = mipi_dsi_cmds_tx(tp, req->cmds, req->cmds_cnt);
 
 	if (req->cb)
-		req->cb(ret, NULL);
+		req->cb(ret);
 
 }
 
 void mipi_dsi_cmdlist_rx(struct dcs_cmd_req *req)
 {
 	int len;
+	u32 *dp;
 	struct dsi_buf *tp;
 	struct dsi_buf *rp;
 
@@ -1637,16 +1679,17 @@ void mipi_dsi_cmdlist_rx(struct dcs_cmd_req *req)
 	rp = &dsi_rx_buf;
 
 	len = mipi_dsi_cmds_rx_new(tp, rp, req, req->rlen);
+	dp = (u32 *)rp->data;
 
 	if (req->cb)
-		req->cb(rp->len, rp->data);
+		req->cb(*dp);
 }
 
 void mipi_dsi_cmdlist_commit(int from_mdp)
 {
 	struct dcs_cmd_req *req;
-	u32 dsi_ctrl;
 	int video;
+	u32 dsi_ctrl;
 
 	mutex_lock(&cmd_mutex);
 	req = mipi_dsi_cmdlist_get();

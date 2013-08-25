@@ -1,5 +1,4 @@
-/* Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
- * Copyright (C) 2013 Sony Mobile Communications AB.
+/* Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,7 +28,7 @@
 #include <linux/file.h>
 #include <linux/major.h>
 #include <linux/regulator/consumer.h>
-#include <linux/msm_ion.h>
+#include <linux/ion.h>
 #include <linux/sync.h>
 #include <linux/sw_sync.h>
 
@@ -108,6 +107,8 @@
 #define	BASE_ADDR(height, y_stride) ((height % 64) * y_stride)
 #define	HW_BASE_ADDR(height, y_stride) (((dstp0_ystride >> 5) << 11) - \
 					((dst_height & 0x3f) * dstp0_ystride))
+
+#define WAIT_FENCE_TIMEOUT 200
 
 uint32_t rotator_hw_revision;
 static char rot_iommu_split_domain;
@@ -210,8 +211,6 @@ struct msm_rotator_dev {
 	#ifdef CONFIG_MSM_BUS_SCALING
 	uint32_t bus_client_handle;
 	#endif
-	u32 sec_mapped;
-	u32 mmu_clk_on;
 	struct rot_sync_info sync_info[MAX_SESSIONS];
 	/* non blocking */
 	struct mutex commit_mutex;
@@ -251,7 +250,9 @@ int msm_rotator_iommu_map_buf(int mem_id, int domain,
 		pr_err("ion_import_dma_buf() failed\n");
 		return PTR_ERR(*pihdl);
 	}
-	pr_debug("%s(): ion_hdl %p, ion_fd %d\n", __func__, *pihdl, mem_id);
+
+	pr_debug("%s(): ion_hdl %p, ion_fd %d\n", __func__, *pihdl,
+		ion_share_dma_buf(msm_rotator_dev->client, *pihdl));
 
 	if (rot_iommu_split_domain) {
 		if (secure) {
@@ -602,8 +603,6 @@ static int get_bpp(int format)
 		return 1;
 
 	case MDP_RGB_888:
-	case MDP_YCBCR_H1V1:
-	case MDP_YCRCB_H1V1:
 		return 3;
 
 	case MDP_YCRYCB_H2V1:
@@ -650,14 +649,11 @@ static int msm_rotator_get_plane_sizes(uint32_t format,	uint32_t w, uint32_t h,
 	case MDP_RGB_565:
 	case MDP_BGR_565:
 	case MDP_YCRYCB_H2V1:
-	case MDP_YCBCR_H1V1:
-	case MDP_YCRCB_H1V1:
 		p->num_planes = 1;
 		p->plane_size[0] = w * h * get_bpp(format);
 		break;
 	case MDP_Y_CRCB_H2V1:
 	case MDP_Y_CBCR_H2V1:
-	case MDP_Y_CRCB_H1V2:
 		p->num_planes = 2;
 		p->plane_size[0] = w * h;
 		p->plane_size[1] = w * h;
@@ -726,7 +722,6 @@ static int msm_rotator_get_plane_sizes(uint32_t format,	uint32_t w, uint32_t h,
 uint32_t fast_yuv_invalid_size_checker(unsigned char rot_mode,
 						uint32_t src_width,
 						uint32_t dst_width,
-						uint32_t src_height,
 						uint32_t dst_height,
 						uint32_t dstp0_ystride,
 						uint32_t is_planar420)
@@ -740,9 +735,6 @@ uint32_t fast_yuv_invalid_size_checker(unsigned char rot_mode,
 		return -EINVAL;
 
 	if (rot_mode & MDP_ROT_90) {
-
-		if ((src_height % 128) == 8)
-			return -EINVAL;
 
 		/* if rotation 90 degree on fast yuv
 		 * rotator image input width has to be multiple of 8
@@ -796,9 +788,9 @@ uint32_t fast_yuv_invalid_size_checker(unsigned char rot_mode,
 	} else {
 		/* if NOT applying rotation 90 degree on fast yuv,
 		 * rotator image input width has to be multiple of 8
-		 * rotator image input height has to be multiple of 8
+		 * rotator image input height has to be multiple of 2
 		*/
-		if (((dst_width % 8) != 0) || ((dst_height % 8) != 0))
+		if (((dst_width % 8) != 0) || ((dst_height % 2) != 0))
 			return -EINVAL;
 	}
 
@@ -895,14 +887,26 @@ static int msm_rotator_ycxcx_h2v2(struct msm_rotator_img_info *info,
 	switch (info->src.format) {
 	case MDP_Y_CRCB_H2V2_TILE:
 		is_tile = 1;
+		dst_format = MDP_Y_CRCB_H2V2;
+		break;
 	case MDP_Y_CR_CB_H2V2:
 	case MDP_Y_CR_CB_GH2V2:
+		if (fast_yuv_en) {
+			dst_format = info->src.format;
+			break;
+		}
 	case MDP_Y_CRCB_H2V2:
 		dst_format = MDP_Y_CRCB_H2V2;
 		break;
+	case MDP_Y_CB_CR_H2V2:
+		if (fast_yuv_en) {
+			dst_format = info->src.format;
+			break;
+		}
+		dst_format = MDP_Y_CBCR_H2V2;
+		break;
 	case MDP_Y_CBCR_H2V2_TILE:
 		is_tile = 1;
-	case MDP_Y_CB_CR_H2V2:
 	case MDP_Y_CBCR_H2V2:
 		dst_format = MDP_Y_CBCR_H2V2;
 		break;
@@ -926,7 +930,7 @@ static int msm_rotator_ycxcx_h2v2(struct msm_rotator_img_info *info,
 			((info->dst_y * info->dst.width) + info->dst_x),
 		  MSM_ROTATOR_OUTP0_ADDR);
 	iowrite32(out_chroma_paddr +
-			((info->dst_y * info->dst.width)/2 + info->dst_x),
+			(((info->dst_y * info->dst.width)/2) + info->dst_x),
 		  MSM_ROTATOR_OUTP1_ADDR);
 	if (out_chroma2_paddr)
 		iowrite32(out_chroma2_paddr +
@@ -953,7 +957,6 @@ static int msm_rotator_ycxcx_h2v2(struct msm_rotator_img_info *info,
 					info->src.width << 16,
 					MSM_ROTATOR_SRC_YSTRIDE1);
 		}
-		
 		if (out_chroma2_paddr) {
 			if (info->dst.format == MDP_Y_CR_CB_GH2V2) {
 				iowrite32(ALIGN(info->dst.width, 16) |
@@ -974,7 +977,8 @@ static int msm_rotator_ycxcx_h2v2(struct msm_rotator_img_info *info,
 					MSM_ROTATOR_OUT_YSTRIDE1);
 		}
 
-		if (dst_format == MDP_Y_CBCR_H2V2) {
+		if (dst_format == MDP_Y_CBCR_H2V2 ||
+			dst_format == MDP_Y_CB_CR_H2V2) {
 			iowrite32(GET_PACK_PATTERN(0, 0, CLR_CB, CLR_CR, 8),
 				  MSM_ROTATOR_SRC_UNPACK_PATTERN1);
 			iowrite32(GET_PACK_PATTERN(0, 0, CLR_CB, CLR_CR, 8),
@@ -985,9 +989,11 @@ static int msm_rotator_ycxcx_h2v2(struct msm_rotator_img_info *info,
 			iowrite32(GET_PACK_PATTERN(0, 0, CLR_CR, CLR_CB, 8),
 				  MSM_ROTATOR_OUT_PACK_PATTERN1);
 		}
+
 		iowrite32((3  << 18) | 		/* chroma sampling 3=4:2:0 */
 			  (ROTATIONS_TO_BITMASK(info->rotations) << 9) |
 			  1 << 8 |			/* ROT_EN */
+			  fast_yuv_en << 4 |		/*fast YUV*/
 			  info->downscale_ratio << 2 |	/* downscale v ratio */
 			  info->downscale_ratio,	/* downscale h ratio */
 			  MSM_ROTATOR_SUB_BLOCK_CFG);
@@ -1019,12 +1025,9 @@ static int msm_rotator_ycrycb(struct msm_rotator_img_info *info,
 	int bpp;
 	uint32_t dst_format;
 
-	if (info->src.format == MDP_YCRYCB_H2V1) {
-		if (info->rotations & MDP_ROT_90)
-			dst_format = MDP_Y_CRCB_H1V2;
-		else
-			dst_format = MDP_Y_CRCB_H2V1;
-	} else
+	if (info->src.format == MDP_YCRYCB_H2V1)
+		dst_format = MDP_Y_CRCB_H2V1;
+	else
 		return -EINVAL;
 
 	if (info->dst.format != dst_format)
@@ -1135,8 +1138,6 @@ static int msm_rotator_rgb_types(struct msm_rotator_img_info *info,
 			break;
 
 		case MDP_RGB_888:
-		case MDP_YCBCR_H1V1:
-		case MDP_YCRCB_H1V1:
 			iowrite32(GET_PACK_PATTERN(0, CLR_R, CLR_G, CLR_B, 8),
 				  MSM_ROTATOR_SRC_UNPACK_PATTERN1);
 			iowrite32(GET_PACK_PATTERN(0, CLR_R, CLR_G, CLR_B, 8),
@@ -1197,7 +1198,7 @@ static int msm_rotator_rgb_types(struct msm_rotator_img_info *info,
 	return 0;
 }
 
-static int get_img(struct msmfb_data *fbd, int domain,
+static int get_img(struct msmfb_data *fbd, unsigned char src,
 	unsigned long *start, unsigned long *len, struct file **p_file,
 	int *p_need, struct ion_handle **p_ihdl, unsigned int secure)
 {
@@ -1241,7 +1242,7 @@ static int get_img(struct msmfb_data *fbd, int domain,
 #endif
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-	return msm_rotator_iommu_map_buf(fbd->memory_id, domain, start,
+	return msm_rotator_iommu_map_buf(fbd->memory_id, src, start,
 		len, p_ihdl, secure);
 #endif
 #ifdef CONFIG_ANDROID_PMEM
@@ -1260,7 +1261,6 @@ static void put_img(struct file *p_file, struct ion_handle *p_ihdl,
 	if (p_file != NULL)
 		put_pmem_file(p_file);
 #endif
-
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
 	if (!IS_ERR_OR_NULL(p_ihdl)) {
 		pr_debug("%s(): p_ihdl %p\n", __func__, p_ihdl);
@@ -1352,7 +1352,7 @@ static int msm_rotator_rotate_prepare(
 		goto rotate_prepare_error;
 	}
 
-	rc = get_img(&info.dst, ROTATOR_DST_DOMAIN, (unsigned long *)&out_paddr,
+	rc = get_img(&info.dst, ROTATOR_SRC_DOMAIN, (unsigned long *)&out_paddr,
 			(unsigned long *)&dst_len, &dstp0_file, &p_need,
 			&dstp0_ihdl, img_info->secure);
 	if (rc) {
@@ -1479,10 +1479,10 @@ static int msm_rotator_rotate_prepare(
 
 rotate_prepare_error:
 	put_img(dstp1_file, dstp1_ihdl, ROTATOR_DST_DOMAIN,
-		msm_rotator_dev->rot_session[s]->img_info.secure);
-	put_img(srcp1_file, srcp1_ihdl, ROTATOR_SRC_DOMAIN, 0);
-	put_img(dstp0_file, dstp0_ihdl, ROTATOR_DST_DOMAIN,
-		msm_rotator_dev->rot_session[s]->img_info.secure);
+	  msm_rotator_dev->rot_session[s]->img_info.secure);
+  	put_img(srcp1_file, srcp1_ihdl, ROTATOR_SRC_DOMAIN, 0);
+  	put_img(dstp0_file, dstp0_ihdl, ROTATOR_DST_DOMAIN,
+    	  msm_rotator_dev->rot_session[s]->img_info.secure);
 
 	/* only source may use frame buffer */
 	if (info.src.flags & MDP_MEMORY_ID_TYPE_FB)
@@ -1578,8 +1578,6 @@ static int msm_rotator_do_rotate_sub(
 	case MDP_XRGB_8888:
 	case MDP_BGRA_8888:
 	case MDP_RGBX_8888:
-	case MDP_YCBCR_H1V1:
-	case MDP_YCRCB_H1V1:
 		rc = msm_rotator_rgb_types(img_info,
 					   in_paddr, out_paddr,
 					   use_imem,
@@ -1654,10 +1652,10 @@ do_rotate_exit:
 #endif
 	schedule_delayed_work(&msm_rotator_dev->rot_clk_work, HZ);
 	put_img(dstp1_file, dstp1_ihdl, ROTATOR_DST_DOMAIN,
-		img_info->secure);
+	  img_info->secure);
 	put_img(srcp1_file, srcp1_ihdl, ROTATOR_SRC_DOMAIN, 0);
 	put_img(dstp0_file, dstp0_ihdl, ROTATOR_DST_DOMAIN,
-		img_info->secure);
+	  img_info->secure);
 
 	/* only source may use frame buffer */
 	if (info.src.flags & MDP_MEMORY_ID_TYPE_FB)
@@ -1844,41 +1842,22 @@ static int msm_rotator_start(unsigned long arg,
 	switch (info.src.format) {
 	case MDP_Y_CB_CR_H2V2:
 	case MDP_Y_CR_CB_H2V2:
-	/* To support Movie Studio, the following line needs to be removed */
-	/* case MDP_Y_CR_CB_GH2V2: */
+	case MDP_Y_CR_CB_GH2V2:
 		is_planar420 = 1;
 	case MDP_Y_CBCR_H2V2:
 	case MDP_Y_CRCB_H2V2:
 	case MDP_Y_CRCB_H2V2_TILE:
 	case MDP_Y_CBCR_H2V2_TILE:
-		if (rotator_hw_revision >= ROTATOR_REVISION_V2) {
-
-			if (!info.downscale_ratio) {
-				fast_yuv_en = !fast_yuv_invalid_size_checker(
-							     info.rotations,
-							     info.src.width,
-							     info.src.height,
-							     dst_w,
-							     dst_h,
-							     dst_w,
-							     is_planar420);
-			} else if ((info.src.width == 1920) &&
-				   (info.downscale_ratio == 1) &&
-				   (!info.rotations)) {
-				/*
-				 * Also allow fast_yuv when down scaling
-				 * 1080p to 720p without rotations
-				 */
-				fast_yuv_en = !fast_yuv_invalid_size_checker(
-							     info.rotations,
-							     info.src.width,
-							     info.dst.width,
-							     info.src.height,
-							     info.dst.height,
-							     info.dst.width,
-							     is_planar420);
-			}
-		}
+		if (rotator_hw_revision >= ROTATOR_REVISION_V2 &&
+			!(info.downscale_ratio &&
+			(info.rotations & MDP_ROT_90)))
+			fast_yuv_en = !fast_yuv_invalid_size_checker(
+						info.rotations,
+						info.src.width,
+						dst_w,
+						dst_h,
+						dst_w,
+						is_planar420);
 	break;
 	default:
 		fast_yuv_en = 0;
@@ -1900,22 +1879,25 @@ static int msm_rotator_start(unsigned long arg,
 	case MDP_Y_CRCB_H2V2:
 	case MDP_Y_CBCR_H2V1:
 	case MDP_Y_CRCB_H2V1:
-	case MDP_YCBCR_H1V1:
-	case MDP_YCRCB_H1V1:
 		info.dst.format = info.src.format;
 		break;
 	case MDP_YCRYCB_H2V1:
-		if (info.rotations & MDP_ROT_90)
-			info.dst.format = MDP_Y_CRCB_H1V2;
-		else
-			info.dst.format = MDP_Y_CRCB_H2V1;
+		info.dst.format = MDP_Y_CRCB_H2V1;
 		break;
 	case MDP_Y_CB_CR_H2V2:
+		if (fast_yuv_en) {
+			info.dst.format = info.src.format;
+			break;
+		}
 	case MDP_Y_CBCR_H2V2_TILE:
 		info.dst.format = MDP_Y_CBCR_H2V2;
 		break;
 	case MDP_Y_CR_CB_H2V2:
 	case MDP_Y_CR_CB_GH2V2:
+		if (fast_yuv_en) {
+			info.dst.format = info.src.format;
+			break;
+		}
 	case MDP_Y_CRCB_H2V2_TILE:
 		info.dst.format = MDP_Y_CRCB_H2V2;
 		break;
@@ -1975,11 +1957,6 @@ static int msm_rotator_start(unsigned long arg,
 
 	if (rc == 0 && copy_to_user((void __user *)arg, &info, sizeof(info)))
 		rc = -EFAULT;
-
-/* TODO: implement map_sec_resource
-	if ((rc == 0) && (info.secure))
-		map_sec_resource(msm_rotator_dev);
-*/
 
 	sync_info = &msm_rotator_dev->sync_info[s];
 	if ((rc == 0) && (sync_info->initialized == false)) {
@@ -2255,8 +2232,7 @@ static int __devinit msm_rotator_probe(struct platform_device *pdev)
 		}
 	}
 
-	msm_rotator_dev->regulator = regulator_get(&msm_rotator_dev->pdev->dev,
-						   "vdd");
+	msm_rotator_dev->regulator = regulator_get(NULL, pdata->regulator_name);
 	if (IS_ERR(msm_rotator_dev->regulator))
 		msm_rotator_dev->regulator = NULL;
 
@@ -2396,11 +2372,7 @@ static int __devexit msm_rotator_remove(struct platform_device *plat_dev)
 
 	rot_wait_for_commit_queue(true);
 #ifdef CONFIG_MSM_BUS_SCALING
-	if (msm_rotator_dev->bus_client_handle) {
-		msm_bus_scale_unregister_client
-			(msm_rotator_dev->bus_client_handle);
-		msm_rotator_dev->bus_client_handle = 0;
-	}
+	msm_bus_scale_unregister_client(msm_rotator_dev->bus_client_handle);
 #endif
 	free_irq(msm_rotator_dev->irq, NULL);
 	mutex_destroy(&msm_rotator_dev->rotator_lock);
@@ -2434,6 +2406,13 @@ static int __devexit msm_rotator_remove(struct platform_device *plat_dev)
 #ifdef CONFIG_PM
 static int msm_rotator_suspend(struct platform_device *dev, pm_message_t state)
 {
+#if defined(CONFIG_ARCH_MSM8X60)
+    /* fixed that bottom current is high after rotator is started */
+#ifdef CONFIG_MSM_BUS_SCALING
+    msm_bus_scale_client_update_request(msm_rotator_dev->bus_client_handle, 0);
+#endif
+#endif
+
 	rot_wait_for_commit_queue(true);
 	mutex_lock(&msm_rotator_dev->imem_lock);
 	if (msm_rotator_dev->imem_clk_state == CLK_EN

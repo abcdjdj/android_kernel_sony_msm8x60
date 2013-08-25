@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -462,15 +462,6 @@ static void mdp4_wfd_wait4ov(int cndx)
 
 	vctrl = &vsync_ctrl_db[cndx];
 
-/* FIXME: double-check
-	mutex_lock(&mfd->writeback_mutex);
-	list_add_tail(&node->active_entry, &mfd->writeback_busy_queue);
-	mutex_unlock(&mfd->writeback_mutex);
-	mfd->writeback_active_cnt--;
-	mutex_unlock(&mfd->unregister_mutex);
-	wake_up(&mfd->wait_q);
-*/
-
 	if (atomic_read(&vctrl->suspend) > 0)
 		return;
 
@@ -572,9 +563,9 @@ static struct msmfb_writeback_data_list *get_if_registered(
 			}
 
 			if (mdp_iommu_split_domain)
-				domain = DISPLAY_WRITE_DOMAIN;
-			else
-				domain = DISPLAY_READ_DOMAIN;
+		          domain = DISPLAY_WRITE_DOMAIN;
+      			else
+        		  domain = DISPLAY_READ_DOMAIN;
 
 			if (ion_map_iommu(mfd->iclient,
 					  srcp_ihdl,
@@ -680,9 +671,9 @@ int mdp4_writeback_dequeue_buffer(struct fb_info *info, struct msmfb_data *data)
 		if (!data->iova)
 			if (mfd->iclient && node->ihdl) {
 				if (mdp_iommu_split_domain)
-					domain = DISPLAY_WRITE_DOMAIN;
-				else
-					domain = DISPLAY_READ_DOMAIN;
+			          domain = DISPLAY_WRITE_DOMAIN;
+			        else
+			          domain = DISPLAY_READ_DOMAIN;
 
 				ion_unmap_iommu(mfd->iclient,
 						node->ihdl,

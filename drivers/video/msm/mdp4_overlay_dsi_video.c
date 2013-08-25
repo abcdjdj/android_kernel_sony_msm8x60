@@ -293,9 +293,9 @@ int mdp4_dsi_video_pipe_commit(int cndx, int wait)
 
 	if (wait) {
 		if (pipe->ov_blt_addr)
-			mdp4_dsi_video_wait4ov(cndx);
+			mdp4_dsi_video_wait4ov(0);
 		else
-			mdp4_dsi_video_wait4dmap(cndx);
+			mdp4_dsi_video_wait4dmap(0);
 	}
 
 	return cnt;
@@ -387,12 +387,6 @@ static void mdp4_dsi_video_wait4dmap(int cndx)
 	if (atomic_read(&vctrl->suspend) > 0)
 		return;
 
-/* OLD CODE
-	if (!wait_for_completion_timeout(
-			&vctrl->dmap_comp, msecs_to_jiffies(100)))
-		pr_err("%s %d  TIMEOUT_\n", __func__, __LINE__);
-OLD CODE */
-
 	ret = wait_for_completion_interruptible_timeout(
 			&vctrl->dmap_comp,
 		msecs_to_jiffies(WAIT_FOR_COMPLETION_TIMEOUT));
@@ -441,12 +435,6 @@ static void mdp4_dsi_video_wait4ov(int cndx)
 
 	if (atomic_read(&vctrl->suspend) > 0)
 		return;
-
-/* OLD CODE
-	if (!wait_for_completion_timeout(
-			&vctrl->ov_comp, msecs_to_jiffies(100)))
-		pr_err("%s %d  TIMEOUT_\n", __func__, __LINE__);
-OLD CODE */
 
 	ret = wait_for_completion_interruptible_timeout(
 			&vctrl->ov_comp,
@@ -682,9 +670,9 @@ int mdp4_dsi_video_on(struct platform_device *pdev)
 	pipe->bpp = bpp;
 
 	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	  pipe->srcp0_addr = mfd->display_iova + buf_offset;
 	else
-		pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	  pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 	pipe->dst_h = fbi->var.yres;
 	pipe->dst_w = fbi->var.xres;
@@ -839,7 +827,6 @@ int mdp4_dsi_video_off(struct platform_device *pdev)
 			/* adb stop */
 			if (pipe->pipe_type == OVERLAY_TYPE_BF)
 				mdp4_overlay_borderfill_stage_down(pipe);
-
 			/* base pipe may change after borderfill_stage_down */
 			pipe = vctrl->base_pipe;
 			mdp4_mixer_stage_down(pipe, 1);
@@ -954,9 +941,9 @@ void mdp4_dsi_video_3d_sbys(struct msm_fb_data_type *mfd,
 	pipe->dst_x = 0;
 
 	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	  pipe->srcp0_addr = mfd->display_iova + buf_offset;
 	else
-		pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	  pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 	mdp4_overlay_rgb_setup(pipe);
 
@@ -1244,9 +1231,9 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 		buf_offset = calc_fb_offset(mfd, fbi, bpp);
 
 		if (mfd->display_iova)
-			pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	  	  pipe->srcp0_addr = mfd->display_iova + buf_offset;
 		else
-			pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	  	  pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 		mdp4_dsi_video_pipe_queue(0, pipe);
 	}

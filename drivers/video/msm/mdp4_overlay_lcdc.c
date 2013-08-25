@@ -304,9 +304,9 @@ int mdp4_lcdc_pipe_commit(int cndx, int wait)
 
 	if (wait) {
 		if (pipe->ov_blt_addr)
-			mdp4_lcdc_wait4ov(cndx);
+			mdp4_lcdc_wait4ov(0);
 		else
-			mdp4_lcdc_wait4dmap(cndx);
+			mdp4_lcdc_wait4dmap(0);
 	}
 
 	return cnt;
@@ -593,7 +593,6 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 		pipe = vctrl->base_pipe;
 	}
 
-
 	pipe->src_height = fbi->var.yres;
 	pipe->src_width = fbi->var.xres;
 	pipe->src_h = fbi->var.yres;
@@ -604,9 +603,9 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 	pipe->dst_w = fbi->var.xres;
 
 	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	  pipe->srcp0_addr = mfd->display_iova + buf_offset;
 	else
-		pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	  pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 	pipe->srcp0_ystride = fbi->fix.line_length;
 	pipe->bpp = bpp;
@@ -625,6 +624,7 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 
 	mdp4_overlay_reg_flush(pipe, 1);
 	mdp4_mixer_stage_up(pipe, 0);
+	mdp4_mixer_stage_commit(pipe->mixer_num);
 
 
 	/*
@@ -645,12 +645,7 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 	lcdc_bpp = mfd->panel_info.bpp;
 
 	hsync_period =
-	    hsync_pulse_width + h_back_porch + h_front_porch;
-	if ((mfd->panel_info.type == LVDS_PANEL) &&
-		(mfd->panel_info.lvds.channel_mode == LVDS_DUAL_CHANNEL_MODE))
-		hsync_period += lcdc_width / 2;
-	else
-		hsync_period += lcdc_width;
+	    hsync_pulse_width + h_back_porch + lcdc_width + h_front_porch;
 	hsync_ctrl = (hsync_period << 16) | hsync_pulse_width;
 	hsync_start_x = hsync_pulse_width + h_back_porch;
 	hsync_end_x = hsync_period - h_front_porch - 1;
@@ -685,19 +680,18 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 
 
 #ifdef CONFIG_FB_MSM_MDP40
-	if (mfd->panel_info.lcdc.is_sync_active_high) {
-		hsync_polarity = 0;
-		vsync_polarity = 0;
-	} else {
-		hsync_polarity = 1;
-		vsync_polarity = 1;
-	}
+	hsync_polarity = 1;
+	vsync_polarity = 1;
 	lcdc_underflow_clr |= 0x80000000;	/* enable recovery */
 #else
 	hsync_polarity = 0;
 	vsync_polarity = 0;
 #endif
+#ifdef CONFIG_SAMSUNG_8X60_TABLET
 	data_en_polarity = 0;
+#else
+	data_en_polarity = 1;
+#endif
 
 	ctrl_polarity =
 	    (data_en_polarity << 2) | (vsync_polarity << 1) | (hsync_polarity);
@@ -1060,15 +1054,14 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 		buf_offset = calc_fb_offset(mfd, fbi, bpp);
 
 		if (mfd->display_iova)
-			pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	  	  pipe->srcp0_addr = mfd->display_iova + buf_offset;
 		else
-			pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	  	  pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 		mdp4_lcdc_pipe_queue(0, pipe);
 	}
 
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
-	mdp4_dsi_video_pipe_commit(0, 0);
 
 	cnt = mdp4_lcdc_pipe_commit(cndx, 0);
 	if (cnt >= 0) {

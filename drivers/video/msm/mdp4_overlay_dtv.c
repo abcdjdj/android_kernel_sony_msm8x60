@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -31,6 +31,7 @@
 #include "msm_fb.h"
 #include "hdmi_msm.h"
 #include "mdp4.h"
+#include "hdmi_msm.h"
 
 #define DTV_BASE	0xD0000
 
@@ -305,7 +306,7 @@ int mdp4_dtv_pipe_commit(int cndx, int wait)
 	mdp4_stat.overlay_commit[pipe->mixer_num]++;
 
 	if (wait)
-		mdp4_dtv_wait4dmae(cndx);
+		mdp4_dtv_wait4dmae(0);
 
 	return cnt;
 }
@@ -619,6 +620,14 @@ int mdp4_dtv_on(struct platform_device *pdev)
 	vctrl->dev = mfd->fbi->dev;
 	vctrl->vsync_irq_enabled = 0;
 
+#if defined(CONFIG_VIDEO_MHL_V1) || defined(CONFIG_VIDEO_MHL_V2) || \
+		defined(CONFIG_VIDEO_MHL_TAB_V2)
+	if (!hdmi_msm_state->hpd_on_offline) {
+		pr_info("hdmi_online is not\n");
+		return -ENODEV;
+	}
+#endif
+
 	mdp_footswitch_ctrl(TRUE);
 	/* Mdp clock enable */
 	mdp_clk_ctrl(1);
@@ -671,6 +680,14 @@ int mdp4_dtv_off(struct platform_device *pdev)
 	struct vsync_update *vp;
 	int mixer = 0;
 
+#if defined(CONFIG_VIDEO_MHL_V1) || defined(CONFIG_VIDEO_MHL_V2) || \
+		defined(CONFIG_VIDEO_MHL_TAB_V2)
+	if (hdmi_msm_state->hpd_on_offline) {
+		pr_info("hpd_offline is not\n");
+		return -ENODEV;
+	}
+#endif
+
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 
 	mutex_lock(&mfd->dma->ov_mutex);
@@ -691,10 +708,6 @@ int mdp4_dtv_off(struct platform_device *pdev)
 			if (pipe->pipe_type == OVERLAY_TYPE_BF)
 				mdp4_overlay_borderfill_stage_down(pipe);
 
-			/* base pipe may change after borderfill_stage_down */
-			pipe = vctrl->base_pipe;
-			mdp4_mixer_stage_down(pipe, 1);
-			mdp4_overlay_pipe_free(pipe, 1);
 			/* pipe == rgb2 */
 			vctrl->base_pipe = NULL;
 		} else {
@@ -1153,7 +1166,7 @@ void mdp4_dtv_overlay(struct msm_fb_data_type *mfd)
 	}
 
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
-	mdp4_dtv_pipe_commit(cndx, 0);
+	mdp4_dtv_pipe_commit(0, 1);
 	mdp4_overlay_mdp_perf_upd(mfd, 0);
 	mutex_unlock(&mfd->dma->ov_mutex);
 }
