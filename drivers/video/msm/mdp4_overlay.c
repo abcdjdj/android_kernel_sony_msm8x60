@@ -2484,11 +2484,6 @@ static int mdp4_overlay_req2pipe(struct mdp_overlay *req, int mixer,
 	 * zorder 2 == stage 2 == 4
 	 */
 	if (req->id == MSMFB_NEW_REQUEST) {  /* new request */
-		if (mdp4_overlay_pipe_staged(pipe)) {
-			pr_err("%s: ndx=%d still staged\n", __func__,
-						pipe->pipe_ndx);
-			return -EPERM;
-		}
 		pipe->pipe_used++;
 		pipe->mixer_num = mixer;
 		pr_debug("%s: zorder=%d pipe ndx=%d num=%d\n", __func__,
@@ -3829,6 +3824,25 @@ int mdp4_v4l2_overlay_play(struct fb_info *info, struct mdp4_overlay_pipe *pipe,
 done:
 	mutex_unlock(&mfd->dma->ov_mutex);
 	return err;
+}
+int mdp4_update_base_blend(struct msm_fb_data_type *mfd,
+      struct mdp_blend_cfg *mdp_blend_cfg)
+{
+	int ret = 0;
+	u32 mixer_num;
+	struct blend_cfg *blend;
+	mixer_num = mdp4_get_mixer_num(mfd->panel_info.type);
+	if (!ctrl)
+	  return -EPERM;
+	blend = &ctrl->blend[mixer_num][MDP4_MIXER_STAGE_BASE];
+	if (mdp_blend_cfg->is_premultiplied) {
+	  blend->bg_alpha = 0xFF;
+	  blend->op = MDP4_BLEND_FG_ALPHA_BG_CONST;
+	} else {
+	  blend->op = MDP4_BLEND_FG_ALPHA_FG_PIXEL;
+	  blend->bg_alpha = 0;
+	}
+	return ret;
 }
 int mdp4_overlay_reset()
 {

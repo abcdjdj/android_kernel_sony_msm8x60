@@ -1090,7 +1090,7 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 	uint8 *buf;
 	unsigned int buf_offset;
 	int bpp;
-	int cnt, cndx = 0;
+	int cndx = 0;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
 
@@ -1115,6 +1115,7 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 		mdp4_dsi_video_pipe_queue(0, pipe);
 	}
 
+	mutex_lock(&mfd->dma->ov_mutex);
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
 
 	mdp4_dsi_video_pipe_commit(cndx, 0);
