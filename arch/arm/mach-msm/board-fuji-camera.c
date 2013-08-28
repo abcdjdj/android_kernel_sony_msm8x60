@@ -22,6 +22,7 @@
 #include <mach/msm_bus_board.h>
 #ifdef CONFIG_MSM_CAMERA
 #include <mach/camera.h>
+#include <media/msm_camera.h>
 #include <media/sony_sensor_v4l2.h>
 #include <linux/v4l2-mediabus.h>
 #endif

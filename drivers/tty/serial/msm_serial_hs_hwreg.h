@@ -1,6 +1,7 @@
 /* drivers/serial/msm_serial_hs_hwreg.h
  *
- * Copyright (c) 2007-2009, 2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2007-2009, 2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011 Sony Ericsson Mobile Communications AB.
  * 
  * All source code in this file is licensed under the following license
  * except where indicated.
@@ -184,8 +185,8 @@ enum msm_hsl_regs {
 
 /* Parity configuration */
 #define NO_PARITY 0x0
-#define EVEN_PARITY 0x2
-#define ODD_PARITY 0x1
+#define EVEN_PARITY 0x1
+#define ODD_PARITY 0x2
 #define SPACE_PARITY 0x3
 
 #define UARTDM_IPR_STALE_TIMEOUT_MSB_BMSK 0xffffff80

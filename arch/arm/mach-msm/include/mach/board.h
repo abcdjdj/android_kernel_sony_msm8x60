@@ -64,6 +64,18 @@ struct msm_camera_device_platform_data {
 	uint8_t is_vpe;
 	struct msm_bus_scale_pdata *cam_bus_scale_table;
 };
+enum msm_camera_csi_data_format {
+	CSI_8BIT,
+	CSI_10BIT,
+	CSI_12BIT,
+};
+struct msm_camera_csi_params {
+	enum msm_camera_csi_data_format data_format;
+	uint8_t lane_cnt;
+	uint8_t lane_assign;
+	uint8_t settle_cnt;
+	uint8_t dpcm_scheme;
+};
 
 #ifdef CONFIG_SENSORS_MT9T013
 struct msm_camera_legacy_device_platform_data {
@@ -208,12 +220,14 @@ struct msm_camera_i2c_conf {
 	enum msm_camera_i2c_mux_mode i2c_mux_mode;
 };
 
+/* FIXME: We already have these elsewhere 
 enum msm_camera_vreg_name_t {
 	CAM_VDIG,
 	CAM_VIO,
 	CAM_VANA,
 	CAM_VAF,
 };
+*/
 
 struct msm_camera_sensor_platform_info {
 	int mount_angle;
@@ -269,6 +283,7 @@ struct msm_camera_sensor_info {
 	uint8_t num_resources;
 	struct msm_camera_sensor_flash_data *flash_data;
 	int csi_if;
+	struct msm_camera_csi_params csi_params;
 	struct msm_camera_sensor_strobe_flash_data *strobe_flash_data;
 	char *eeprom_data;
 	enum msm_camera_type camera_type;

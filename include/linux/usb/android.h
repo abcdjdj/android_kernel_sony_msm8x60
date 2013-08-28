@@ -28,6 +28,10 @@ struct android_usb_platform_data {
 	char can_stall;
 };
 
+#ifdef CONFIG_USB_ANDROID_GG
+void android_enable_usb_gg(uint16_t vendor_id, uint16_t product_id);
+#endif
+
 #ifndef CONFIG_TARGET_CORE
 static inline int f_tcm_init(int (*connect_cb)(bool connect))
 {
