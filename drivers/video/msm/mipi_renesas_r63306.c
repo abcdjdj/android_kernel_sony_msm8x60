@@ -130,7 +130,7 @@ static int __devexit mipi_r63306_lcd_remove(struct platform_device *pdev)
 		return -ENODEV;
 
 #ifdef CONFIG_DEBUG_FS
-	mipi_dsi_debugfs_exit(pdev);
+	mipi_dsi_panel_remove_debugfs(pdev);
 #endif
 
 	platform_set_drvdata(pdev, NULL);
@@ -202,7 +202,7 @@ static int __devinit mipi_r63306_lcd_probe(struct platform_device *pdev)
 #endif
 
 #ifdef CONFIG_DEBUG_FS
-	mipi_dsi_debugfs_init(pdev, "mipi_r63306");
+	mipi_dsi_panel_create_debugfs(pdev, "mipi_r63306");
 #endif
 
 	return 0;
