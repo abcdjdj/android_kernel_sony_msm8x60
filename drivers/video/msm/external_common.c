@@ -1,5 +1,5 @@
 /* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
- * Copyright (C) 2012-2013 Sony Mobile Communications AB.
+ * Copyright (C) 2012 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1507,8 +1507,7 @@ static void hdmi_edid_get_display_vsd_3d_mode(const uint8 *data_buf,
 	struct hdmi_disp_mode_list_type *disp_mode_list,
 	uint32 num_og_cea_blocks)
 {
-	uint8 len, offset, present_multi_3d, hdmi_vic_len;
-	int hdmi_3d_len;
+	uint8 len, offset, present_multi_3d, hdmi_vic_len, hdmi_3d_len;
 	uint16 structure_all, structure_mask;
 	const uint8 *vsd = num_og_cea_blocks ?
 		hdmi_edid_find_block(data_buf+0x80, DBC_START_OFFSET,
@@ -2012,15 +2011,18 @@ bool hdmi_common_get_video_format_from_drv_data(struct msm_fb_data_type *mfd)
 	uint32 format = HDMI_VFRMT_1920x1080p60_16_9;
 	struct fb_var_screeninfo *var = &mfd->fbi->var;
 	bool changed = TRUE;
+	uint32_t userformat = 0;
+	userformat = var->reserved[3] >> 16;
 
-	if (var->reserved[3]) {
-		format = var->reserved[3]-1;
+	if (userformat) {
+		format = userformat-1;
 		DEV_DBG("reserved format is %d\n", format);
 	} else if (hdmi_prim_resolution) {
 		format = hdmi_prim_resolution - 1;
 	} else {
-		DEV_DBG("detecting resolution from %dx%d use var->reserved[3]"
-			" to specify mode", mfd->var_xres, mfd->var_yres);
+		DEV_DBG("detecting resolution from %dx%d use top 2 bytes of"
+			" var->reserved[3] to specify mode", mfd->var_xres,
+			mfd->var_yres);
 		switch (mfd->var_xres) {
 		default:
 		case  640:
