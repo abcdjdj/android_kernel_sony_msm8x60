@@ -127,8 +127,6 @@ static void sync_timeline_remove_pt(struct sync_pt *pt)
 	spin_lock_irqsave(&obj->child_list_lock, flags);
 	if (!list_empty(&pt->child_list)) {
 		list_del_init(&pt->child_list);
-		needs_freeing = obj->destroyed &&
-			list_empty(&obj->child_list_head);
 	}
 	spin_unlock_irqrestore(&obj->child_list_lock, flags);
 }
