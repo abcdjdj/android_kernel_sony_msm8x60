@@ -3200,6 +3200,54 @@ static int msmfb_overlay_set(struct fb_info *info, void __user *p)
 	return 0;
 }
 
+static int msmfb_overlay_set_pseudo_sharpness(struct fb_info *info, void __user *p)
+{
+	struct mdp_overlay_pseudo_sharpness req_ps;
+	struct mdp_overlay req;
+	int ret;
+
+	if (copy_from_user(&req_ps, p, sizeof(req_ps)))
+		return -EFAULT;
+
+	req.src = req_ps.src;
+	req.src_rect = req_ps.src_rect;
+	req.dst_rect = req_ps.dst_rect;
+	req.z_order = req_ps.z_order;
+	req.is_fg = req_ps.is_fg;
+	req.alpha = req_ps.alpha;
+	req.transp_mask = req_ps.transp_mask;
+	req.flags = req_ps.flags;
+	req.id = req_ps.id;
+	memcpy(req.user_data, req_ps.user_data, sizeof(req.user_data));
+	req.overlay_pp_cfg.config_ops = 0;
+
+	ret = mdp4_overlay_set(info, &req);
+	if (ret) {
+		printk(KERN_ERR "%s: ioctl failed, rc=%d\n",
+			__func__, ret);
+		return ret;
+	}
+
+	req_ps.src = req.src;
+	req_ps.src_rect = req.src_rect;
+	req_ps.dst_rect = req.dst_rect;
+	req_ps.z_order = req.z_order;
+	req_ps.is_fg = req.is_fg;
+	req_ps.alpha = req.alpha;
+	req_ps.transp_mask = req.transp_mask;
+	req_ps.flags = req.flags;
+	req_ps.id = req.id;
+	memcpy(req_ps.user_data, req.user_data, sizeof(req_ps.user_data));
+
+	if (copy_to_user(p, &req_ps, sizeof(req_ps))) {
+		printk(KERN_ERR "%s: copy2user failed \n",
+			__func__);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 static int msmfb_overlay_unset(struct fb_info *info, unsigned long *argp)
 {
 	int ret, ndx;
@@ -3825,6 +3873,9 @@ static int msm_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		break;
 	case MSMFB_OVERLAY_SET:
 		ret = msmfb_overlay_set(info, argp);
+		break;
+	case MSMFB_OVERLAY_SET_PSEUDO_SHARPNESS:
+		ret = msmfb_overlay_set_pseudo_sharpness(info, argp);
 		break;
 	case MSMFB_OVERLAY_UNSET:
 		ret = msmfb_overlay_unset(info, argp);
