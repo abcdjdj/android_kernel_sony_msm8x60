@@ -50,6 +50,10 @@
 #define MFD_KEY  0x11161126
 #define MSM_FB_MAX_DEV_LIST 32
 
+#ifndef MDP_MAX_FENCE_FD
+#define MDP_MAX_FENCE_FD 10
+#endif
+
 struct disp_info_type_suspend {
 	boolean op_enable;
 	boolean sw_refreshing_enable;
@@ -82,6 +86,7 @@ struct msm_fb_data_type {
 	struct fb_info *fbi;
 
 	struct device *dev;
+	struct delayed_work backlight_worker;
 	boolean op_enable;
 	uint32 fb_imgType;
 	boolean sw_currently_refreshing;

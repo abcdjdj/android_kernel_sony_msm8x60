@@ -351,11 +351,6 @@ int mdp4_overlay_borderfill_supported(void)
 	return (mdp_rev >= MDP_REV_42);
 }
 
-int mdp4_overlay_borderfill_supported(void)
-{
-	return (ctrl->hw_version >= 0x0402030b);
-}
-
 void mdp4_overlay_dmae_cfg(struct msm_fb_data_type *mfd, int atv)
 {
 	uint32	dmae_cfg_reg;

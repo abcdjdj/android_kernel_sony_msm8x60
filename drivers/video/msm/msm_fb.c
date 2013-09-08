@@ -883,24 +883,6 @@ static void msmfb_early_resume(struct early_suspend *h)
 
 static int unset_bl_level, bl_updated;
 static int bl_level_old;
-static int mdp_bl_scale_config(struct msm_fb_data_type *mfd,
-						struct mdp_bl_scale_data *data)
-{
-	int ret = 0;
-	int curr_bl;
-	down(&mfd->sem);
-	curr_bl = mfd->bl_level;
-	bl_scale = data->scale;
-	bl_min_lvl = data->min_lvl;
-	pr_debug("%s: update scale = %d, min_lvl = %d\n", __func__, bl_scale,
-								bl_min_lvl);
-
-	/* update current backlight to use new scaling*/
-	msm_fb_set_backlight(mfd, curr_bl);
-	up(&mfd->sem);
-
-	return ret;
-}
 
 static int mdp_bl_scale_config(struct msm_fb_data_type *mfd,
 						struct mdp_bl_scale_data *data)
@@ -3268,19 +3250,6 @@ static int msmfb_overlay_play_wait(struct fb_info *info, unsigned long *argp)
 	return ret;
 }
 
-static int msmfb_overlay_commit(struct fb_info *info, unsigned long *argp)
-{
-	int ret, ndx;
-
-	ret = copy_from_user(&ndx, argp, sizeof(ndx));
-	if (ret) {
-		pr_err("%s: ioctl failed\n", __func__);
-		return ret;
-	}
-
-	return mdp4_overlay_commit(info, ndx);
-}
-
 static int msmfb_overlay_play(struct fb_info *info, unsigned long *argp)
 {
 	int	ret;
@@ -3340,7 +3309,6 @@ static int msmfb_overlay_play_enable(struct fb_info *info, unsigned long *argp)
 	return 0;
 }
 
-#ifdef CONFIG_FB_MSM_OVERLAY0_WRITEBACK
 static int msmfb_overlay_blt(struct fb_info *info, unsigned long *argp)
 {
 	int     ret;

@@ -1150,6 +1150,7 @@ int mipi_dsi_cmds_tx(struct dsi_buf *tp, struct dsi_cmd_desc *cmds, int cnt)
 	struct dsi_cmd_desc *cm;
 	uint32 dsi_ctrl, ctrl;
 	int i, video_mode;
+	unsigned long flag;
 
 	/* turn on cmd mode
 	* for video mode, do not send cmds more than
@@ -1289,106 +1290,6 @@ int mipi_dsi_cmds_rx(struct msm_fb_data_type *mfd,
 	spin_unlock_irqrestore(&dsi_mdp_lock, flag);
 
 	if (mfd->panel_info.mipi.no_max_pkt_size) {
-		/*
-		 * remove extra 2 bytes from previous
-		 * rx transaction at shift register
-		 * which was inserted during copy
-		 * shift registers to rx buffer
-		 * rx payload start from long alignment addr
-		 */
-		rp->data += 2;
-	}
-
-	cmd = rp->data[0];
-	switch (cmd) {
-	case DTYPE_ACK_ERR_RESP:
-		pr_debug("%s: rx ACK_ERR_PACLAGE\n", __func__);
-		break;
-	case DTYPE_GEN_READ1_RESP:
-	case DTYPE_DCS_READ1_RESP:
-		mipi_dsi_short_read1_resp(rp);
-		break;
-	case DTYPE_GEN_READ2_RESP:
-	case DTYPE_DCS_READ2_RESP:
-		mipi_dsi_short_read2_resp(rp);
-		break;
-	case DTYPE_GEN_LREAD_RESP:
-	case DTYPE_DCS_LREAD_RESP:
-		mipi_dsi_long_read_resp(rp);
-		break;
-	default:
-		break;
-	}
-
-	return rp->len;
-}
-
-int mipi_dsi_cmds_rx_new(struct dsi_buf *tp, struct dsi_buf *rp,
-			struct dcs_cmd_req *req, int rlen)
-{
-	struct dsi_cmd_desc *cmds;
-	int cnt, len, diff, pkt_size;
-	char cmd;
-
-	if (req->flags & CMD_REQ_NO_MAX_PKT_SIZE) {
-		/* Only support rlen = 4*n */
-		rlen += 3;
-		rlen &= ~0x03;
-	}
-
-	cmds = req->cmds;
-
-	len = rlen;
-	diff = 0;
-
-	if (len <= 2)
-		cnt = 4;	/* short read */
-	else {
-		if (len > MIPI_DSI_LEN)
-			len = MIPI_DSI_LEN;	/* 8 bytes at most */
-
-		cnt = len + 6; /* 4 bytes header + 2 bytes crc */
-	}
-
-	if (!(req->flags & CMD_REQ_NO_MAX_PKT_SIZE)) {
-
-
-		/* packet size need to be set at every read */
-		pkt_size = len;
-		max_pktsize[0] = pkt_size;
-		mipi_dsi_enable_irq(DSI_CMD_TERM);
-		mipi_dsi_buf_init(tp);
-		mipi_dsi_cmd_dma_add(tp, pkt_size_cmd);
-		mipi_dsi_cmd_dma_tx(tp);
-	}
-
-	mipi_dsi_enable_irq(DSI_CMD_TERM);
-	mipi_dsi_buf_init(tp);
-	mipi_dsi_cmd_dma_add(tp, cmds);
-
-	/* transmit read comamnd to client */
-	mipi_dsi_cmd_dma_tx(tp);
-
-	mipi_dsi_disable_irq(DSI_CMD_TERM);
-	/*
-	 * once cmd_dma_done interrupt received,
-	 * return data from client is ready and stored
-	 * at RDBK_DATA register already
-	 */
-	mipi_dsi_buf_init(rp);
-	if (req->flags & CMD_REQ_NO_MAX_PKT_SIZE) {
-		/*
-		 * expect rlen = n * 4
-		 * short alignement for start addr
-		 */
-		rp->data += 2;
-	}
-
-	mipi_dsi_cmd_dma_rx(rp, cnt);
-	diff = rp->len - cnt;
-	rp->data += diff;
-
-	if (req->flags & CMD_REQ_NO_MAX_PKT_SIZE) {
 		/*
 		 * remove extra 2 bytes from previous
 		 * rx transaction at shift register

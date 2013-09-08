@@ -35,53 +35,17 @@
 
 static int dsi_state;
 
+#define TOUT_PERIOD	HZ	/* 1 second */
+#define MS_100		(HZ/10)	/* 100 ms */
+
+static int vsync_start_y_adjust = 4;
+
 #define MAX_CONTROLLER	1
 
 /*
  * VSYNC_EXPIRE_TICK == 0 means clock always on
  * VSYNC_EXPIRE_TICK == 4 is recommended
  */
-#define VSYNC_EXPIRE_TICK 4
-
-static struct vsycn_ctrl {
-	struct device *dev;
-	int inited;
-	int update_ndx;
-	int expire_tick;
-	int blt_wait;
-	u32 ov_koff;
-	u32 ov_done;
-	u32 dmap_koff;
-	u32 dmap_done;
-	u32 pan_display;
-	uint32 rdptr_intr_tot;
-	uint32 rdptr_sirq_tot;
-	atomic_t suspend;
-	int wait_vsync_cnt;
-	int blt_change;
-	int blt_free;
-	int blt_end;
-	int sysfs_created;
-	struct mutex update_lock;
-	struct completion ov_comp;
-	struct completion dmap_comp;
-	struct completion vsync_comp;
-	spinlock_t spin_lock;
-	struct msm_fb_data_type *mfd;
-	struct mdp4_overlay_pipe *base_pipe;
-	struct vsync_update vlist[2];
-	int vsync_enabled;
-	int clk_enabled;
-	int clk_control;
-	ktime_t vsync_time;
-	struct work_struct clk_work;
-} vsync_ctrl_db[MAX_CONTROLLER];
-
-static void vsync_irq_enable(int intr, int term)
-{
-	unsigned long flag;
-
-#define MAX_CONTROLLER	1
 #define VSYNC_EXPIRE_TICK 4
 
 static struct vsycn_ctrl {
@@ -1161,6 +1125,7 @@ void mdp_dsi_cmd_overlay_suspend(struct msm_fb_data_type *mfd)
 			mdp4_overlay_iommu_pipe_free(pipe->pipe_ndx, 1);
 		}
 	}
+}
 
 void mdp4_dsi_cmd_overlay(struct msm_fb_data_type *mfd)
 {
