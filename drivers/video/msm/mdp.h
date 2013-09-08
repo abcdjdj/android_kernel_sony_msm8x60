@@ -97,10 +97,6 @@ struct vsync {
 	struct work_struct vsync_work;
 	int vsync_irq_enabled;
 	int disabled_clocks;
-	struct completion vsync_wait;
-	atomic_t suspend;
-	atomic_t vsync_resume;
-	int sysfs_created;
 };
 
 extern struct vsync vsync_cntrl;
@@ -842,12 +838,8 @@ static inline int mdp_bus_scale_update_request(uint32_t index)
 void mdp_dma_vsync_ctrl(int enable);
 void mdp_dma_video_vsync_ctrl(int enable);
 void mdp_dma_lcdc_vsync_ctrl(int enable);
-ssize_t mdp_dma_show_event(struct device *dev,
-		struct device_attribute *attr, char *buf);
-ssize_t mdp_dma_video_show_event(struct device *dev,
-		struct device_attribute *attr, char *buf);
-ssize_t mdp_dma_lcdc_show_event(struct device *dev,
-		struct device_attribute *attr, char *buf);
+void mdp3_vsync_irq_enable(int intr, int term);
+void mdp3_vsync_irq_disable(int intr, int term);
 
 #ifdef MDP_HW_VSYNC
 void vsync_clk_prepare_enable(void);
@@ -918,5 +910,26 @@ static inline void mdp_vid_quant_set(void)
 {
 	/* empty */
 }
+#endif
+
+#ifdef CONFIG_UPDATE_LCDC_LUT
+#define R_MASK    0x00ff0000
+#define G_MASK    0x000000ff
+#define B_MASK    0x0000ff00
+#define R_SHIFT   16
+#define G_SHIFT   0
+#define B_SHIFT   8
+#define lut2r(lut) ((lut & R_MASK) >> R_SHIFT)
+#define lut2g(lut) ((lut & G_MASK) >> G_SHIFT)
+#define lut2b(lut) ((lut & B_MASK) >> B_SHIFT)
+
+#ifdef CONFIG_LCD_KCAL
+#define NUM_QLUT  256
+#define MAX_KCAL_V (NUM_QLUT-1)
+#define scaled_by_kcal(rgb, kcal) \
+		(((((unsigned int)(rgb) * (unsigned int)(kcal)) << 16) / \
+		(unsigned int)MAX_KCAL_V) >> 16)
+#endif
+int mdp_preset_lut_update_lcdc(struct fb_cmap *cmap, uint32_t *internal_lut);
 #endif
 #endif /* MDP_H */

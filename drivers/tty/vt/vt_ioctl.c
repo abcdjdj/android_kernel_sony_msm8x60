@@ -110,6 +110,34 @@ void vt_event_post(unsigned int event, unsigned int old, unsigned int new)
 		wake_up_interruptible(&vt_event_waitqueue);
 }
 
+static void __vt_event_queue(struct vt_event_wait *vw)
+{
+	unsigned long flags;
+	/* Prepare the event */
+	INIT_LIST_HEAD(&vw->list);
+	vw->done = 0;
+	/* Queue our event */
+	spin_lock_irqsave(&vt_event_lock, flags);
+	list_add(&vw->list, &vt_events);
+	spin_unlock_irqrestore(&vt_event_lock, flags);
+}
+
+static void __vt_event_wait(struct vt_event_wait *vw)
+{
+	/* Wait for it to pass */
+	wait_event_interruptible(vt_event_waitqueue, vw->done);
+}
+
+static void __vt_event_dequeue(struct vt_event_wait *vw)
+{
+	unsigned long flags;
+
+	/* Dequeue it */
+	spin_lock_irqsave(&vt_event_lock, flags);
+	list_del(&vw->list);
+	spin_unlock_irqrestore(&vt_event_lock, flags);
+}
+
 /**
  *	vt_event_wait		-	wait for an event
  *	@vw: our event
@@ -121,20 +149,9 @@ void vt_event_post(unsigned int event, unsigned int old, unsigned int new)
 
 static void vt_event_wait(struct vt_event_wait *vw)
 {
-	unsigned long flags;
-	/* Prepare the event */
-	INIT_LIST_HEAD(&vw->list);
-	vw->done = 0;
-	/* Queue our event */
-	spin_lock_irqsave(&vt_event_lock, flags);
-	list_add(&vw->list, &vt_events);
-	spin_unlock_irqrestore(&vt_event_lock, flags);
-	/* Wait for it to pass */
-	wait_event_interruptible(vt_event_waitqueue, vw->done);
-	/* Dequeue it */
-	spin_lock_irqsave(&vt_event_lock, flags);
-	list_del(&vw->list);
-	spin_unlock_irqrestore(&vt_event_lock, flags);
+	__vt_event_queue(vw);
+	__vt_event_wait(vw);
+	__vt_event_dequeue(vw);
 }
 
 /**

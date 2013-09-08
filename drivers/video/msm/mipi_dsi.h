@@ -263,7 +263,7 @@ struct dsi_kickoff_action {
 
 #define CMD_REQ_MAX	4
 
-typedef void (*fxn)(int len, char* data);
+typedef void (*fxn)(u32 data);
 
 #define CMD_REQ_RX	0x0001
 #define CMD_REQ_COMMIT 0x0002
@@ -314,6 +314,8 @@ void mipi_dsi_set_tear_on(struct msm_fb_data_type *mfd);
 void mipi_dsi_set_tear_off(struct msm_fb_data_type *mfd);
 void mipi_dsi_set_backlight(struct msm_fb_data_type *mfd, int level);
 void mipi_dsi_cmd_backlight_tx(struct dsi_buf *dp);
+void mipi_dsi_clk_enable(void);
+void mipi_dsi_clk_disable(void);
 void mipi_dsi_pre_kickoff_action(void);
 void mipi_dsi_post_kickoff_action(void);
 void mipi_dsi_pre_kickoff_add(struct dsi_kickoff_action *act);
