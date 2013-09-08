@@ -187,9 +187,6 @@ int q6asm_audio_client_buf_free_contiguous(unsigned int dir,
 int q6asm_open_read(struct audio_client *ac, uint32_t format);
 int q6asm_open_read_v2_1(struct audio_client *ac, uint32_t format);
 
-int q6asm_open_read_compressed(struct audio_client *ac,
-			 uint32_t frames_per_buffer, uint32_t meta_data_mode);
-
 int q6asm_open_write(struct audio_client *ac, uint32_t format);
 
 int q6asm_open_write_compressed(struct audio_client *ac, uint32_t format);
