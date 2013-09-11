@@ -409,8 +409,8 @@ static inline void mmc_signal_sdio_irq(struct mmc_host *host)
 	if (host->sdio_irq_thread) {
 		host->ops->enable_sdio_irq(host, 0);
 	host->sdio_irq_pending = true;
-	if (host->sdio_irq_thread)
 		wake_up_process(host->sdio_irq_thread);
+	}
 }
 
 struct regulator;
