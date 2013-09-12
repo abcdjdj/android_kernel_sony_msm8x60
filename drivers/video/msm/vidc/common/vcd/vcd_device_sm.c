@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -129,16 +129,10 @@ void vcd_ddl_callback(u32 event, u32 status, void *payload,
 		{
 			transc = (struct vcd_transc *)client_data;
 
-			if (!transc || !transc->in_use || !transc->cctxt) {
+			if (!transc || !transc->in_use
+				|| !transc->cctxt) {
 				VCD_MSG_ERROR("Invalid clientdata "
-					"received from DDL, transc = 0x%x\n",
-					(u32)transc);
-				if (transc) {
-					VCD_MSG_ERROR("transc->in_use = %u, "
-						"transc->cctxt = 0x%x\n",
-						transc->in_use,
-						(u32)transc->cctxt);
-				}
+							  "received from DDL ");
 			} else {
 				cctxt = transc->cctxt;
 
@@ -537,12 +531,12 @@ static u32 vcd_init_cmn
 	*driver_handle = 0;
 
 	driver_id = 0;
-	while (driver_id < VCD_DRIVER_CLIENTS_MAX &&
+	while (driver_id < VCD_DRIVER_INSTANCE_MAX &&
 		   dev_ctxt->driver_ids[driver_id]) {
 		++driver_id;
 	}
 
-	if (driver_id == VCD_DRIVER_CLIENTS_MAX) {
+	if (driver_id == VCD_DRIVER_INSTANCE_MAX) {
 		VCD_MSG_ERROR("Max driver instances reached");
 
 		return VCD_ERR_FAIL;
@@ -759,7 +753,6 @@ static u32 vcd_open_cmn
 	client = dev_ctxt->cctxt_list_head;
 	dev_ctxt->cctxt_list_head = cctxt;
 	cctxt->next = client;
-	dev_ctxt->turbo_mode_set = 0;
 
 	*clnt_cctxt = cctxt;
 
