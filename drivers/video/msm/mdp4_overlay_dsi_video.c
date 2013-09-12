@@ -693,9 +693,8 @@ int mdp4_dsi_video_off(struct platform_device *pdev)
 	struct msm_fb_data_type *mfd;
 	struct vsycn_ctrl *vctrl;
 	struct mdp4_overlay_pipe *pipe;
-	struct vsync_update *vp;
 	unsigned long flags;
-	int undx, need_wait = 0;
+	int need_wait = 0;
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 	vctrl = &vsync_ctrl_db[cndx];
@@ -1107,9 +1106,9 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
 
+	cnt = 0;
 	mutex_lock(&mfd->dma->ov_mutex);
-	mdp4_dsi_video_pipe_commit();
-	mutex_unlock(&mfd->dma->ov_mutex);
+	cnt = mdp4_dsi_video_pipe_commit(cndx, 0);
 
 	if (cnt) {
 		if (pipe->ov_blt_addr)

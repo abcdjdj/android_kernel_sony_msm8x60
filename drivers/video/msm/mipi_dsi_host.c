@@ -1512,6 +1512,7 @@ static void mipi_dsi_video_wait_to_mdp_busy(void)
 
 void mipi_dsi_cmd_mdp_busy(void)
 {
+	u32 status;
 	unsigned long flags;
 	int need_wait = 0;
 
