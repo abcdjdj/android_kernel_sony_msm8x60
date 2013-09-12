@@ -167,6 +167,12 @@ void hdmi_msm_cec_init(void)
 		| HDMI_MSM_CEC_REFTIMER_REFTIMER(27 * 50)
 		);
 
+	/* 0x02A4 CEC_TIME */
+	HDMI_OUTP(0x02A4,
+		HDMI_MSM_CEC_TIME_SIGNAL_FREE_TIME(350)
+		| HDMI_MSM_CEC_TIME_ENABLE
+		);
+
 	/*
 	 * 0x02A0 CEC_ADDR
 	 * Starting with a default address of 4
@@ -256,13 +262,8 @@ void hdmi_msm_cec_msg_send(struct hdmi_msm_cec_msg *msg)
 
 	/* 0x0294 HDMI_MSM_CEC_RETRANSMIT */
 	HDMI_OUTP(0x0294,
-#ifdef DRVR_ONLY_CECT_NO_DAEMON
 		HDMI_MSM_CEC_RETRANSMIT_NUM(msg->retransmit)
 		| (msg->retransmit > 0) ? HDMI_MSM_CEC_RETRANSMIT_ENABLE : 0);
-#else
-		HDMI_MSM_CEC_RETRANSMIT_NUM(0) |
-			HDMI_MSM_CEC_RETRANSMIT_ENABLE);
-#endif
 
 	/* 0x028C CEC_CTRL */
 	HDMI_OUTP(0x028C, 0x1 | msg->frame_size << 4);
@@ -825,17 +826,14 @@ static void hdmi_msm_send_event(boolean on)
 
 		DEV_INFO("HDMI HPD: CONNECTED: send ONLINE\n");
 		kobject_uevent(external_common_state->uevent_kobj, KOBJ_ONLINE);
-		if (!hdmi_msm_state->hdcp_enable) {
-			/* Send Audio for HDMI Compliance Cases*/
-			envp[0] = "HDCP_STATE=PASS";
-			envp[1] = NULL;
-			DEV_INFO("HDMI HPD: sense : send HDCP_PASS\n");
-			kobject_uevent_env(external_common_state->uevent_kobj,
-				KOBJ_CHANGE, envp);
-			if (!hdmi_msm_is_dvi_mode())
-				switch_set_state(&external_common_state->
-							audio_sdev, 1);
-		}
+#ifndef CONFIG_FB_MSM_HDMI_MSM_PANEL_HDCP_SUPPORT
+		/* Send Audio for HDMI Compliance Cases*/
+		envp[0] = "HDCP_STATE=PASS";
+		envp[1] = NULL;
+		DEV_INFO("HDMI HPD: sense : send HDCP_PASS\n");
+		kobject_uevent_env(external_common_state->uevent_kobj,
+			KOBJ_CHANGE, envp);
+#endif
 	} else {
 		switch_set_state(&external_common_state->sdev, 0);
 		DEV_INFO("hdmi: Hdmi state switch to %d: %s\n",
@@ -2493,11 +2491,28 @@ static int hdcp_authentication_part1(void)
 
 		msm_hdmi_init_ddc();
 
-		/* wait for panel power to be on before read bcaps */
-		timeout_count = 100;
-		while (!hdmi_msm_state->panel_power_on && timeout_count--)
-			msleep(20);
-		msleep(100);
+		/* Read Bksv 5 bytes at 0x00 in HDCP port */
+		ret = hdmi_msm_ddc_read(0x74, 0x00, bksv, 5, 5, "Bksv", TRUE);
+		if (ret) {
+			DEV_ERR("%s(%d): Read BKSV failed", __func__, __LINE__);
+			goto error;
+		}
+		/* check there are 20 ones in BKSV */
+		if (hdmi_msm_count_one(bksv, 5) != 20) {
+			DEV_ERR("HDCP: BKSV read from Sink doesn't have "
+				"20 1's and 20 0's, FAIL (BKSV="
+				"%02x%02x%02x%02x%02x)\n",
+				bksv[4], bksv[3], bksv[2], bksv[1], bksv[0]);
+			ret = -EINVAL;
+			goto error;
+		}
+
+		link0_bksv_0 = bksv[3];
+		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[2];
+		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[1];
+		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[0];
+		link0_bksv_1 = bksv[4];
+		DEV_DBG("HDCP: BKSV=%02x%08x\n", link0_bksv_1, link0_bksv_0);
 
 		/* read Bcaps at 0x40 in HDCP Port */
 		ret = hdmi_msm_ddc_read(0x74, 0x40, &bcaps, 1, 5, "Bcaps",
@@ -2584,6 +2599,12 @@ static int hdcp_authentication_part1(void)
 			goto error;
 		}
 
+		/*
+		 * A small delay is needed here to avoid device crash observed
+		 * during reauthentication in MSM8960
+		 */
+		msleep(20);
+
 		/* 0x0168 HDCP_RCVPORT_DATA12
 		   [23:8] BSTATUS
 		   [7:0] BCAPS */
@@ -2642,31 +2663,6 @@ static int hdcp_authentication_part1(void)
 		}
 		DEV_DBG("HDCP: Link0-AKSV=%02x%08x\n",
 			link0_aksv_1 & 0xFF, link0_aksv_0);
-
-		msleep(50);
-
-		/* Read Bksv 5 bytes at 0x00 in HDCP port */
-		ret = hdmi_msm_ddc_read(0x74, 0x00, bksv, 5, 5, "Bksv", TRUE);
-		if (ret) {
-			DEV_ERR("%s(%d): Read BKSV failed", __func__, __LINE__);
-			goto error;
-		}
-		/* check there are 20 ones in BKSV */
-		if (hdmi_msm_count_one(bksv, 5) != 20) {
-			DEV_ERR("HDCP: BKSV read from Sink doesn't have "
-				"20 1's and 20 0's, FAIL (BKSV="
-				"%02x%02x%02x%02x%02x)\n",
-				bksv[4], bksv[3], bksv[2], bksv[1], bksv[0]);
-			ret = -EINVAL;
-			goto error;
-		}
-
-		link0_bksv_0 = bksv[3];
-		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[2];
-		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[1];
-		link0_bksv_0 = (link0_bksv_0 << 8) | bksv[0];
-		link0_bksv_1 = bksv[4];
-		DEV_DBG("HDCP: BKSV=%02x%08x\n", link0_bksv_1, link0_bksv_0);
 
 		/* 0x0134 HDCP_RCVPORT_DATA0
 		   [31:0] LINK0_BKSV_0 */
@@ -3783,8 +3779,8 @@ static uint8 hdmi_msm_avi_iframe_lut[][16] = {
 	 0x10,	0x10,	0x10,	0x10,	0x10, 0x10, 0x10}, /*00*/
 	{0x18,	0x18,	0x28,	0x28,	0x28,	 0x28,	0x28,	0x28,	0x28,
 	 0x28,	0x28,	0x28,	0x28,	0x18, 0x28, 0x18}, /*01*/
-	{0x00,	0x00,	0x00,	0x00,	0x00,	 0x00,	0x00,	0x00,	0x00,
-	 0x00,	0x00,	0x00,	0x00,	0x00, 0x00, 0x00}, /*02*/
+	{0x04,	0x04,	0x04,	0x04,	0x04,	 0x04,	0x04,	0x04,	0x04,
+	 0x04,	0x04,	0x04,	0x04,	0x88, 0x04, 0x04}, /*02*/
 	{0x02,	0x06,	0x11,	0x15,	0x04,	 0x13,	0x10,	0x05,	0x1F,
 	 0x14,	0x20,	0x22,	0x21,	0x01, 0x03, 0x11}, /*03*/
 	{0x00,	0x01,	0x00,	0x01,	0x00,	 0x00,	0x00,	0x00,	0x00,
@@ -4548,49 +4544,6 @@ static int hdmi_msm_power_on(struct platform_device *pdev)
 	return 0;
 }
 
-void mhl_connect_api(boolean on)
-{
-	char *envp[2];
-
-	/* Simulating a HPD event based on MHL event */
-	hdmi_msm_state->hpd_cable_chg_detected = FALSE;
-	/* QDSP OFF preceding the HPD event notification */
-	switch_set_state(&external_common_state->sdev, 0);
-	DEV_INFO("Hdmi state switched to %d: %s\n",
-		 external_common_state->sdev.state,  __func__);
-	if (on) {
-		hdmi_msm_read_edid();
-		hdmi_msm_state->reauth = FALSE ;
-		/* Build EDID table */
-		hdmi_msm_turn_on();
-		DEV_INFO("HDMI HPD: CONNECTED: send ONLINE\n");
-		kobject_uevent(external_common_state->uevent_kobj,
-			       KOBJ_ONLINE);
-		envp[0] = 0;
-		if (!hdmi_msm_state->hdcp_enable) {
-			/* Send Audio for HDMI Compliance Cases*/
-			envp[0] = "HDCP_STATE=PASS";
-			envp[1] = NULL;
-			DEV_INFO("HDMI HPD: sense : send HDCP_PASS\n");
-			kobject_uevent_env(external_common_state->uevent_kobj,
-					   KOBJ_CHANGE, envp);
-			switch_set_state(&external_common_state->sdev, 1);
-			DEV_INFO("Hdmi state switched to %d: %s\n",
-				 external_common_state->sdev.state, __func__);
-		} else {
-			hdmi_msm_hdcp_enable();
-		}
-	} else {
-		DEV_INFO("HDMI HPD: DISCONNECTED: send OFFLINE\n");
-		kobject_uevent(external_common_state->uevent_kobj,
-			       KOBJ_OFFLINE);
-		switch_set_state(&external_common_state->sdev, 0);
-		DEV_INFO("Hdmi state switched to %d: %s\n",
-			 external_common_state->sdev.state,  __func__);
-	}
-}
-EXPORT_SYMBOL(mhl_connect_api);
-
 /* Note that power-off will also be called when the cable-remove event is
  * processed on the user-space and as a result the framebuffer is powered
  * down.  However, we are still required to be able to detect a cable-insert
@@ -4671,6 +4624,9 @@ static int __devinit hdmi_msm_probe(struct platform_device *pdev)
 	int rc;
 	struct platform_device *fb_dev;
 
+	if (cpu_is_apq8064())
+		return -ENODEV;
+
 	if (!hdmi_msm_state) {
 		pr_err("%s: hdmi_msm_state is NULL\n", __func__);
 		return -ENOMEM;
@@ -4737,8 +4693,6 @@ static int __devinit hdmi_msm_probe(struct platform_device *pdev)
 		rc = IS_ERR(hdmi_msm_state->hdmi_s_pclk);
 		goto error;
 	}
-
-	hdmi_msm_state->is_mhl_enabled = hdmi_msm_state->pd->is_mhl_enabled;
 
 	rc = check_hdmi_features();
 	if (rc) {
@@ -4956,6 +4910,9 @@ static int __init hdmi_msm_init(void)
 {
 	int rc;
 
+	if (cpu_is_msm8930())
+		return 0;
+
 	if (msm_fb_detect_client("hdmi_msm"))
 		return 0;
 
@@ -4972,14 +4929,7 @@ static int __init hdmi_msm_init(void)
 	}
 
 	external_common_state = &hdmi_msm_state->common;
-
-	if (hdmi_prim_display && hdmi_prim_resolution)
-		external_common_state->video_resolution =
-			hdmi_prim_resolution - 1;
-	else
-		external_common_state->video_resolution =
-			HDMI_VFRMT_1920x1080p60_16_9;
-
+	external_common_state->video_resolution = HDMI_VFRMT_1920x1080p60_16_9;
 #ifdef CONFIG_FB_MSM_HDMI_3D
 	external_common_state->switch_3d = hdmi_msm_switch_3d;
 #endif

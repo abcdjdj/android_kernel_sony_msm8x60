@@ -90,7 +90,6 @@ struct lcdc_panel_info {
 	uint32 xres_pad;
 	/* Pad height */
 	uint32 yres_pad;
-	boolean is_sync_active_high;
 };
 
 struct mddi_panel_info {
@@ -146,17 +145,6 @@ struct mipi_panel_info {
 	char force_clk_lane_hs;
 };
 
-enum lvds_mode {
-	LVDS_SINGLE_CHANNEL_MODE,
-	LVDS_DUAL_CHANNEL_MODE,
-};
-
-struct lvds_panel_info {
-	enum lvds_mode channel_mode;
-	/* Channel swap in dual mode */
-	char channel_swap;
-};
-
 struct msm_panel_info {
 	__u32 xres;
 	__u32 yres;
@@ -174,6 +162,8 @@ struct msm_panel_info {
 	__u32 clk_min;
 	__u32 clk_max;
 	__u32 frame_count;
+	__u32 width;
+	__u32 height;
 	__u32 is_3d_panel;
 	__u32 frame_rate;
 
@@ -185,8 +175,6 @@ struct msm_panel_info {
 	struct lcd_panel_info lcd;
 	struct lcdc_panel_info lcdc;
 	struct mipi_panel_info mipi;
-	struct lvds_panel_info lvds;
-
 };
 
 #define MSM_FB_SINGLE_MODE_PANEL(pinfo)		\
@@ -208,6 +196,8 @@ struct msm_fb_panel_data {
 	int (*off) (struct platform_device *pdev);
 	int power_on_panel_at_pan;
 	int (*power_ctrl) (boolean enable);
+	void (*window_adjust)(u16 x1, u16 x2, u16 y1, u16 y2);
+	int power_on_panel_at_pan;
 	struct platform_device *next;
 	int (*clk_func) (int enable);
 	struct msm_panel_info *(*panel_detect) (struct msm_fb_data_type *mfd);

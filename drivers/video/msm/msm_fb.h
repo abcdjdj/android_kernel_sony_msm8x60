@@ -23,6 +23,7 @@
 #include "linux/proc_fs.h"
 
 #include <mach/hardware.h>
+#include <mach/msm_subsystem_map.h>
 #include <linux/io.h>
 #include <mach/board.h>
 
@@ -135,8 +136,6 @@ struct msm_fb_data_type {
 			      struct fb_cmap *cmap);
 	int (*do_histogram) (struct fb_info *info,
 			      struct mdp_histogram_data *hist);
-	int (*start_histogram) (struct mdp_histogram_start_req *req);
-	int (*stop_histogram) (struct fb_info *info, uint32_t block);
 	void (*vsync_ctrl) (int enable);
 	void (*vsync_init) (int cndx);
 	void *vsync_show;
@@ -182,8 +181,7 @@ struct msm_fb_data_type {
 	struct list_head writeback_register_queue;
 	wait_queue_head_t wait_q;
 	struct ion_client *iclient;
-	unsigned long display_iova;
-	unsigned long rotator_iova;
+	struct msm_mapped_buffer *map_buffer;
 	struct mdp_buf_type *ov0_wb_buf;
 	struct mdp_buf_type *ov1_wb_buf;
 	u32 ov_start;
@@ -223,7 +221,7 @@ int msm_fb_check_frame_rate(struct msm_fb_data_type *mfd,
 				struct fb_info *info);
 
 #ifdef CONFIG_FB_MSM_LOGO
-#define INIT_IMAGE_FILE "/initlogo.rle"
+#define INIT_IMAGE_FILE "/logo.rle"
 int load_565rle_image(char *filename, bool bf_supported);
 #endif
 

@@ -297,7 +297,7 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 		/* Blt */
 		if (vctrl->blt_wait)
 			need_dmap_wait = 1;
-		if (vctrl->ov_koff != vctrl->ov_done) {
+		else if (vctrl->ov_koff != vctrl->ov_done) {
 			INIT_COMPLETION(vctrl->ov_comp);
 			need_ov_wait = 1;
 		}
@@ -680,10 +680,7 @@ ssize_t mdp4_dsi_cmd_show_event(struct device *dev,
 		msecs_to_jiffies(VSYNC_PERIOD * 4));
 	if (ret <= 0) {
 		vctrl->wait_vsync_cnt = 0;
-		vsync_tick = ktime_to_ns(ktime_get());
-		ret = snprintf(buf, PAGE_SIZE, "VSYNC=%llu", vsync_tick);
-		buf[strlen(buf) + 1] = '\0';
-		return ret;
+		vctrl->vsync_time = ktime_get();
 	}
 
 	spin_lock_irqsave(&vctrl->spin_lock, flags);
@@ -691,8 +688,6 @@ ssize_t mdp4_dsi_cmd_show_event(struct device *dev,
 	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
 
 	ret = snprintf(buf, PAGE_SIZE, "VSYNC=%llu", vsync_tick);
-	pr_debug("%s: UEVENT\n", __func__);
-
 	buf[strlen(buf) + 1] = '\0';
 	return ret;
 }
@@ -873,6 +868,8 @@ static void mdp4_overlay_update_dsi_cmd(struct msm_fb_data_type *mfd)
 	/* disable dsi trigger */
 	MDP_OUTP(MDP_BASE + 0x000a4, 0x00);
 
+	mdp4_overlay_solidfill_init(pipe);
+
 	mdp4_overlay_setup_pipe_addr(mfd, pipe);
 
 	mdp4_overlay_rgb_setup(pipe);
@@ -1001,6 +998,7 @@ int mdp4_dsi_cmd_on(struct platform_device *pdev)
 	vctrl = &vsync_ctrl_db[cndx];
 	vctrl->mfd = mfd;
 	vctrl->dev = mfd->fbi->dev;
+	vctrl->vsync_enabled = 0;
 
 	mdp_clk_ctrl(1);
 	mdp4_overlay_update_dsi_cmd(mfd);
@@ -1009,8 +1007,8 @@ int mdp4_dsi_cmd_on(struct platform_device *pdev)
 	mdp4_iommu_attach();
 
 	atomic_set(&vctrl->suspend, 0);
-
 	pr_debug("%s-:\n", __func__);
+
 	return ret;
 }
 

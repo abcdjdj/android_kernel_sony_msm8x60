@@ -175,11 +175,14 @@ int mdp4_overlay_writeback_update(struct msm_fb_data_type *mfd)
 	pipe->dst_x = 0;
 
 	mdp4_overlay_mdp_pipe_req(pipe, mfd);
-
-	if (mfd->display_iova)
-		pipe->srcp0_addr = mfd->display_iova + buf_offset;
-	else
+	if (mfd->map_buffer) {
+		pipe->srcp0_addr = (unsigned int)mfd->map_buffer->iova[0] + \
+			buf_offset;
+		pr_debug("start 0x%lx srcp0_addr 0x%x\n", mfd->
+			map_buffer->iova[0], pipe->srcp0_addr);
+	} else {
 		pipe->srcp0_addr = (uint32)(buf + buf_offset);
+	}
 
 	mdp4_mixer_stage_up(pipe, 0);
 
@@ -281,7 +284,7 @@ void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
 
 	if (!writeback_pipe->ov_blt_addr) {
 		pr_err("%s: no writeback buffer 0x%x, %p\n", __func__,
-			(unsigned int)writeback_pipe->ov_blt_addr, node);
+				(unsigned int)writeback_pipe->ov_blt_addr, node);
 		mutex_unlock(&mfd->unregister_mutex);
 		return;
 	}
@@ -296,8 +299,6 @@ void mdp4_writeback_kickoff_video(struct msm_fb_data_type *mfd,
 	mdp4_mixer_stage_commit(pipe->mixer_num);
 
 	mdp4_writeback_overlay_kickoff(mfd, pipe);
-	mdp4_writeback_dma_busy_wait(mfd);
-	mdp_clk_ctrl(0);
 
 	/* move current committed iommu to freelist */
 	mdp4_overlay_iommu_pipe_free(pipe->pipe_ndx, 0);
@@ -405,8 +406,6 @@ static struct msmfb_writeback_data_list *get_if_registered(
 {
 	struct msmfb_writeback_data_list *temp;
 	bool found = false;
-	int domain;
-
 	if (!list_empty(&mfd->writeback_register_queue)) {
 		list_for_each_entry(temp,
 				&mfd->writeback_register_queue,
@@ -430,21 +429,16 @@ static struct msmfb_writeback_data_list *get_if_registered(
 		else if (mfd->iclient) {
 			struct ion_handle *srcp_ihdl;
 			ulong len;
-			srcp_ihdl = ion_import_dma_buf(mfd->iclient,
+			srcp_ihdl = ion_import_fd(mfd->iclient,
 						  data->memory_id);
 			if (IS_ERR_OR_NULL(srcp_ihdl)) {
 				pr_err("%s: ion import fd failed\n", __func__);
 				goto register_ion_fail;
 			}
 
-			if (mdp_iommu_split_domain)
-				domain = DISPLAY_WRITE_DOMAIN;
-			else
-				domain = DISPLAY_READ_DOMAIN;
-
 			if (ion_map_iommu(mfd->iclient,
 					  srcp_ihdl,
-					  domain,
+					  DISPLAY_DOMAIN,
 					  GEN_POOL,
 					  SZ_4K,
 					  0,
@@ -523,7 +517,7 @@ int mdp4_writeback_dequeue_buffer(struct fb_info *info, struct msmfb_data *data)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	struct msmfb_writeback_data_list *node = NULL;
-	int rc = 0, domain;
+	int rc = 0;
 
 	rc = wait_event_interruptible(mfd->wait_q, is_buffer_ready(mfd));
 	if (rc) {
@@ -545,14 +539,9 @@ int mdp4_writeback_dequeue_buffer(struct fb_info *info, struct msmfb_data *data)
 		memcpy(data, &node->buf_info, sizeof(struct msmfb_data));
 		if (!data->iova)
 			if (mfd->iclient && node->ihdl) {
-				if (mdp_iommu_split_domain)
-					domain = DISPLAY_WRITE_DOMAIN;
-				else
-					domain = DISPLAY_READ_DOMAIN;
-
 				ion_unmap_iommu(mfd->iclient,
 						node->ihdl,
-						domain,
+						DISPLAY_DOMAIN,
 						GEN_POOL);
 				ion_free(mfd->iclient,
 					 node->ihdl);
