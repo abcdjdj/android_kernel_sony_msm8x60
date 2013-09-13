@@ -45,6 +45,11 @@
 #define INFO(x...) printk(KERN_INFO x)
 #define ERR(x...) printk(KERN_ERR x)
 
+//FIXME!!!!!
+#ifndef ION_FLAG_CACHED
+#define ION_FLAG_CACHED 1
+#endif
+
 static struct vid_enc_dev *vid_enc_device_p;
 static dev_t vid_enc_dev_num;
 static struct class *vid_enc_class;

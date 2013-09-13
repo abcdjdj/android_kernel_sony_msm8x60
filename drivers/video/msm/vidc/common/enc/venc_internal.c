@@ -41,6 +41,12 @@
 #endif
 
 #define ERR(x...) printk(KERN_ERR x)
+
+//FIXME!!!!!
+#ifndef ION_FLAG_CACHED
+#define ION_FLAG_CACHED 1
+#endif
+
 static unsigned int vidc_mmu_subsystem[] = {
 	MSM_SUBSYSTEM_VIDEO};
 
@@ -1837,7 +1843,8 @@ u32 vid_enc_set_recon_buffers(struct video_client_ctx *client_ctx,
 		}
 		control->kernel_virtual_addr = (u8 *) ion_map_kernel(
 			client_ctx->user_ion_client,
-			client_ctx->recon_buffer_ion_handle[i]);
+			client_ctx->recon_buffer_ion_handle[i],
+			ionflag);
 		if (!control->kernel_virtual_addr) {
 			ERR("%s(): get_ION_kernel virtual addr fail\n",
 				 __func__);
