@@ -233,14 +233,13 @@ static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 #ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
 	if (priv->governor == TZ_GOVERNOR_SIMPLE)
 		val = simple_governor(device, idle);
-	else
-		val = __secure_tz_entry(TZ_UPDATE_ID, idle, device->id);
 #else
 	val = __secure_tz_entry(TZ_UPDATE_ID, idle, device->id);
 	if (val)
 		kgsl_pwrctrl_pwrlevel_change(device,
 					     pwr->active_pwrlevel + val);
 }
+#endif
 
 static void tz_busy(struct kgsl_device *device,
 	struct kgsl_pwrscale *pwrscale)
