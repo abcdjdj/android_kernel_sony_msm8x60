@@ -85,6 +85,10 @@ arch/arm/boot/compressed/ashldi3.S
 arch/arm/boot/compressed/piggy.xzkern
 arch/arm/boot/Image
 arch/arm/boot/zImage
+arch/arm/kernel/vmlinux.lds
+arch/arm/boot/compressed/vmlinux.lds
+arch/arm/boot/compressed/vmlinux
+arch/arm/boot/compressed/lib1funcs.S
 
 *.orig
 *~
