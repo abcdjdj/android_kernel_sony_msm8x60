@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/clearpad.h>
+#include <linux/delay.h>
 
 #define CLEARPAD_PAGE_SELECT_REGISTER 0xff
 #define CLEARPAD_PAGE(addr) (((addr) >> 8) & 0xff)
@@ -28,22 +29,37 @@ struct clearpad_i2c {
 	struct mutex page_mutex;
 };
 
-static int clearpad_i2c_read(struct device *dev, u8 reg, u8 *buf, u8 len)
+static int clearpad_i2c_read(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
 {
-	s32 rc = 0;
-	int rsize = I2C_SMBUS_BLOCK_MAX;
-	int off;
+#define LGETOUCH_I2C_RETRY 10
+	int retry = 0;
 
-	for (off = 0; off < len; off += rsize) {
-		if (len < off + I2C_SMBUS_BLOCK_MAX)
-			rsize = len - off;
-		rc = i2c_smbus_read_i2c_block_data(to_i2c_client(dev),
-				reg + off, rsize, &buf[off]);
-		if (rc != rsize) {
-			dev_err(dev, "%s: rc = %d\n", __func__, rc);
-			return rc;
+	struct i2c_msg msgs[] = {
+		{
+			.addr = client->addr,
+			.flags = 0,
+			.len = 1,
+			.buf = &reg,
+		},
+		{
+			.addr = client->addr,
+			.flags = I2C_M_RD,
+			.len = len,
+			.buf = buf,
+		},
+	};
+
+		for (retry = 0; retry <= LGETOUCH_I2C_RETRY; retry++) {
+			if (i2c_transfer(client->adapter, msgs, 2) == 2)
+					break;
+			if (retry == LGETOUCH_I2C_RETRY) {
+				if (printk_ratelimit())
+					printk("transfer error\n");
+					return -EIO;
+				} else
+					msleep(10);
 		}
-	}
+
 	return 0;
 }
 
